@@ -11,7 +11,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5440:5432"
     networks:
       - stock_net
     healthcheck:
@@ -46,7 +46,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://user:password@db:5432/stock_app
+      - DATABASE_URL=postgresql://user:password@db:5440/stock_app
       - OLLAMA_HOST=http://ollama:11434
       - SECRET_KEY=supersecretkeychangeinproduction
       - LLM_PROVIDER=ollama

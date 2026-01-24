@@ -4,7 +4,7 @@ sqlmodel==0.0.14
 psycopg2-binary==2.9.9
 alembic==1.13.1
 sqlalchemy==2.0.46
-APScheduler==3.10.41
+APScheduler==3.10.4
 yfinance==0.2.36
 requests==2.31.0
 beautifulsoup4==4.12.3
