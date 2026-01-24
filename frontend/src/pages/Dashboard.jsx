@@ -254,19 +254,19 @@ const Dashboard = () => {
                                 <div className="flex-1">
                                     <h4 className="text-white font-medium group-hover:text-primary transition-colors">{item.title}</h4>
 
-                                    {/* Related Tickers (The Discovery Lead) */}
-                                    {item.relatedTickers && item.relatedTickers.length > 0 && (
+                                    {/* Sector ETF Holdings (Discovery Lead) */}
+                                    {(item.sector_holdings || item.relatedTickers) && (
                                         <div className="flex flex-wrap gap-2 mt-2">
-                                            {item.relatedTickers.slice(0, 4).map(ticker => (
+                                            {(item.sector_holdings || item.relatedTickers).slice(0, 8).map(ticker => (
                                                 <span
                                                     key={ticker}
                                                     onClick={(e) => {
-                                                        e.preventDefault(); // Prevent opening news link
+                                                        e.preventDefault();
                                                         window.location.href = `/analysis/${ticker}`;
                                                     }}
-                                                    className="text-[10px] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded hover:bg-primary hover:text-white transition-colors cursor-pointer"
+                                                    className="text-[10px] font-extrabold bg-accent/20 text-accent px-2 py-0.5 rounded border border-accent/20 hover:bg-accent hover:text-white transition-all cursor-pointer shadow-sm capitalize"
                                                 >
-                                                    ${ticker}
+                                                    {ticker}
                                                 </span>
                                             ))}
                                         </div>

@@ -124,7 +124,7 @@ class FinanceService:
                  # Find next future date
                  future_dates = stock.earnings_dates.index[stock.earnings_dates.index > pd.Timestamp.now()]
                  if not future_dates.empty:
-                     return str(future_dates[-1].date()) # Closest future date
+                      return str(future_dates[-1].date()) # Closest future date
             return None
         except Exception as e:
             print(f"Error fetching earnings date for {ticker}: {e}")
@@ -149,7 +149,6 @@ class FinanceService:
                 
             return {"name": sector_name, "etf": etf}
             
-            
         except Exception as e:
             return {"name": "Unknown", "etf": "SPY"}
 
@@ -157,7 +156,7 @@ class FinanceService:
     def get_etf_holdings(self, etf_ticker: str) -> List[str]:
         """
         Fetches top 10 holdings for an ETF.
-        Tries yfinance, falls back to static map if failed/empty.
+        Tries yfinance 1.0 funds_data, falls back to static map if failed/empty.
         """
         # Static Fallback Map (Mini version)
         FALLBACK_MAP = {
@@ -176,24 +175,72 @@ class FinanceService:
         }
         
         try:
-            # Try Live Fetch
-            # Note: yf.Ticker(etf).funds_data.top_holdings is available in newer versions
-            # But structure varies. We'll try a safe approach.
+            print(f"FinanceService: Attempting live fetch for {etf_ticker} holdings...")
             stock = yf.Ticker(etf_ticker)
             
-            # Method 1: funds_data (Best actions)
-            if hasattr(stock, 'funds_data') and stock.funds_data:
-                 holdings = stock.funds_data.top_holdings
-                 if holdings:
-                     # holdings is often a dict {ticker: percent} or dataframe
-                     if isinstance(holdings, pd.DataFrame):
-                         return list(holdings.index)[:10]
-                     elif isinstance(holdings, dict):
-                         return list(holdings.keys())[:10]
+            # Method 1: yfinance 1.0 funds_data (Dynamic)
+            if hasattr(stock, 'funds_data') and stock.funds_data is not None:
+                holdings = stock.funds_data.top_holdings
+                if holdings is not None and not holdings.empty:
+                    # Symbol is in the index of the DataFrame
+                    symbols = [s for s in holdings.index.tolist() if s and isinstance(s, str)]
+                    if symbols:
+                        print(f"FinanceService: Successfully fetched {len(symbols)} dynamic holdings for {etf_ticker}")
+                        return symbols[:10]
 
-            # Method 2: Fallback to static
+            print(f"FinanceService: Live fetch failed or empty for {etf_ticker}. Using fallback map.")
             return FALLBACK_MAP.get(etf_ticker, [])
             
         except Exception as e:
             print(f"Error fetching holdings for {etf_ticker}: {e}")
             return FALLBACK_MAP.get(etf_ticker, [])
+
+    @ttl_cache(ttl=3600)
+    def batch_get_technicals(self, tickers: List[str]) -> Dict[str, Dict]:
+        """
+        Optimized technical fetch for multiple tickers.
+        """
+        if not tickers:
+            return {}
+            
+        try:
+            # yfinance download is faster for multiple tickers than individual fetches
+            # Use 3 months of data to ensure we have enough for MA50 and RSI
+            data = yf.download(tickers, period="3mo", group_by="ticker", threads=True, progress=False)
+            
+            results = {}
+            for ticker in tickers:
+                try:
+                    # Handle single ticker edge case (different df structure)
+                    ticker_data = data[ticker] if len(tickers) > 1 else data
+                    
+                    if ticker_data.empty:
+                        continue
+                        
+                    # Basic calculations
+                    close_prices = ticker_data['Close']
+                    ma50 = close_prices.rolling(window=50).mean().iloc[-1]
+                    
+                    # Simple RSI
+                    delta = close_prices.diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                    rs = gain / loss
+                    rsi = 100 - (100 / (1 + rs))
+                    current_rsi = rsi.iloc[-1]
+                    
+                    current_price = close_prices.iloc[-1]
+                    
+                    results[ticker] = {
+                        "rsi_14": round(current_rsi, 2) if not pd.isna(current_rsi) else None,
+                        "ma_50": round(ma50, 2) if not pd.isna(ma50) else None,
+                        "trend": "UP" if current_price > ma50 else "DOWN",
+                        "current_price": round(current_price, 2)
+                    }
+                except Exception:
+                    continue
+            return results
+        except Exception as e:
+            print(f"Batch Technicals failed: {e}")
+            # Fallback to individual fetches (slower but safer)
+            return {t: self.get_technicals(t) for t in tickers}
