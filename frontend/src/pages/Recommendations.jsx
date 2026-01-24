@@ -38,9 +38,10 @@ const Recommendations = () => {
                                 <div>
                                     <div className="flex items-center gap-3">
                                         <h3 className="text-2xl font-bold text-white">{rec.ticker}</h3>
+                                        <span className="text-gray-400 font-medium">{rec.company_name}</span>
                                         <span className={`px-2 py-1 rounded text-xs font-bold ${rec.action === 'BUY' ? 'bg-green-500/20 text-green-400' :
-                                                rec.action === 'SELL' ? 'bg-red-500/20 text-red-400' :
-                                                    'bg-gray-500/20 text-gray-400'
+                                            rec.action === 'SELL' ? 'bg-red-500/20 text-red-400' :
+                                                'bg-gray-500/20 text-gray-400'
                                             }`}>
                                             {rec.action}
                                         </span>
@@ -56,13 +57,28 @@ const Recommendations = () => {
                                 </div>
                             </div>
 
-                            <div className="bg-background/50 p-4 rounded-lg border border-white/5">
-                                <h4 className="text-sm font-semibold text-gray-300 mb-1 flex items-center gap-2">
-                                    <TrendingUp size={16} className="text-accent" /> Analysis Summary
-                                </h4>
-                                <p className="text-gray-400 text-sm leading-relaxed">
-                                    {rec.reasoning}
-                                </p>
+                            <div className="bg-background/50 p-4 rounded-lg border border-white/5 space-y-3">
+                                <div>
+                                    <h4 className="text-sm font-semibold text-gray-300 mb-1 flex items-center gap-2">
+                                        <TrendingUp size={16} className="text-accent" /> Analysis Summary
+                                    </h4>
+                                    <p className="text-gray-400 text-sm leading-relaxed">
+                                        {rec.reasoning}
+                                    </p>
+                                </div>
+
+                                {rec.source_news_url && (
+                                    <div className="pt-2 border-t border-white/5">
+                                        <a
+                                            href={rec.source_news_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-primary hover:text-white transition-colors flex items-center gap-1"
+                                        >
+                                            View Source News Article →
+                                        </a>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ))}

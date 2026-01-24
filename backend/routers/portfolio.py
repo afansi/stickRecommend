@@ -25,3 +25,8 @@ def calculate_injection(amount: float, session: Session = Depends(get_session), 
     alloc_service = AllocationService(session)
     plan = alloc_service.calculate_injection(current_user.id, amount)
     return plan
+
+@router.get("/stats")
+def get_portfolio_stats(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    alloc_service = AllocationService(session)
+    return alloc_service.get_portfolio_stats(current_user.id)

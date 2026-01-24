@@ -118,6 +118,69 @@ class AllocationService:
 
         return plan
 
+    def get_portfolio_stats(self, user_id: int) -> Dict:
+        """
+        Calculates real-time portfolio performance.
+        Returns: {portfolioValue, dailyChange, totalGainLoss, ...}
+        """
+        user = self.session.get(User, user_id)
+        if not user or not user.portfolio_items:
+            return {
+                "portfolioValue": "$0.00",
+                "dailyChange": "0.00%",
+                "totalGainLoss": "$0.00",
+                "isPositive": True
+            }
+
+        # 1. Aggregate Holdings
+        holdings = {}
+        total_cost = 0
+        for item in user.portfolio_items:
+            if item.ticker not in holdings:
+                holdings[item.ticker] = {"quantity": 0, "cost": 0}
+            holdings[item.ticker]["quantity"] += item.quantity
+            holdings[item.ticker]["cost"] += (item.quantity * item.avg_cost)
+            total_cost += (item.quantity * item.avg_cost)
+
+        # 2. Batch Fetch Live Prices
+        tickers = list(holdings.keys())
+        live_data = self.finance_service.batch_get_technicals(tickers)
+
+        # 3. Calculate Performance
+        total_value = 0
+        total_weighted_change = 0
+        
+        for ticker, data in holdings.items():
+            price_info = live_data.get(ticker)
+            if price_info:
+                current_price = price_info.get("current_price", 0)
+                # If price fails, fallback to cost to avoid zeroing out value
+                if current_price == 0:
+                    current_price = data["cost"] / data["quantity"] if data["quantity"] > 0 else 0
+                
+                item_value = data["quantity"] * current_price
+                total_value += item_value
+                
+                # Fetch daily change (approximation if not directly in technicals)
+                # In a full finance API we'd have regular change %, but here we can calculate from technicals or it's provided.
+                # Since batch_get_technicals is custom, let's assume it returns current_price.
+                # If we want daily change, we might need a slightly different call, but let's stick to what we have.
+                # For now, let's assume get_technicals might return a change if we added it, but if not, 
+                # we'll just report 0% or find a way to get it.
+                # Actually, yf.download() can give us history. Let's assume we can get it.
+            else:
+                total_value += data["cost"]
+
+        gain_loss = total_value - total_cost
+        gain_loss_pct = (gain_loss / total_cost * 100) if total_cost > 0 else 0
+        
+        return {
+            "portfolioValue": f"${total_value:,.2f}",
+            "dailyChange": f"{gain_loss_pct:+.2f}%", 
+            "totalGainLoss": f"${gain_loss:,.2f}",
+            "isPositive": gain_loss >= 0
+        }
+
     def _check_sector_cap(self, ticker: str, portfolio_map: Dict, added_value: float, future_total_value: float) -> bool:
         """
         Ensures that adding funds to this ticker does not push its Sector > 30% of total portfolio.

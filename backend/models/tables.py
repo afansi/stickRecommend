@@ -49,12 +49,14 @@ class NewsArticle(SQLModel, table=True):
 class Recommendation(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     ticker: str = Field(index=True)
+    company_name: Optional[str] = None
     action: str # "BUY", "SELL", "HOLD"
     confidence_score: float # 0-10
     reasoning: str
     date_generated: datetime = Field(default_factory=datetime.utcnow)
     is_active: bool = Field(default=True, index=True)
     source_news_id: Optional[int] = Field(default=None, foreign_key="newsarticle.id")
+    source_news_url: Optional[str] = None
     
     user_id: int = Field(foreign_key="user.id", index=True)
     user: Optional[User] = Relationship(back_populates="recommendations")

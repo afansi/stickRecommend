@@ -3,18 +3,27 @@ import api from '../api';
 import { TrendingUp, AlertTriangle, Activity, Radar } from 'lucide-react';
 
 const Dashboard = () => {
-    // Mock Data for "Premium" Feel (In prod, fetch these from backend endpoints)
-    const stats = {
-        portfolioValue: "$45,200",
-        dailyChange: "+1.2%",
-        fearIndex: "65 (Greed)"
-    };
+    const [portfolioStats, setPortfolioStats] = useState({
+        portfolioValue: "$0.00",
+        dailyChange: "0.00%",
+        totalGainLoss: "$0.00",
+        isPositive: true
+    });
 
     const [news, setNews] = useState([]);
     const [recommendations, setRecommendations] = useState([]);
     const [alerts, setAlerts] = useState([]);
     const [loadingNews, setLoadingNews] = useState(true);
     const [scanning, setScanning] = useState(false);
+
+    const fetchStats = async () => {
+        try {
+            const res = await api.get('/portfolio/stats');
+            setPortfolioStats(res.data);
+        } catch (err) {
+            console.error("Failed to load portfolio stats", err);
+        }
+    };
 
     const fetchRecommendations = async () => {
         try {
@@ -50,6 +59,7 @@ const Dashboard = () => {
                 const newsRes = await api.get('/users/news');
                 setNews(newsRes.data);
 
+                await fetchStats();
                 await fetchRecommendations();
                 await fetchAlerts();
 
@@ -102,24 +112,43 @@ const Dashboard = () => {
                 </button>
             </header>
 
-            {/* Widgets Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Widget 1: Health */}
+            {/* Dashboard Stats Row */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                {/* Stat 1: Portfolio Value */}
                 <div className="bg-surface p-6 rounded-xl border border-gray-700 shadow-lg relative overflow-hidden group hover:border-primary/50 transition-colors">
-                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                        <TrendingUp size={64} />
+                    <div className="flex items-center gap-3 text-gray-400 mb-2">
+                        <TrendingUp size={20} className="text-primary" />
+                        <span className="font-medium">Portfolio Value</span>
                     </div>
-                    <div className="flex items-center gap-2 mb-2">
-                        <Activity className="text-primary" size={20} />
-                        <h3 className="text-gray-400 font-medium">Portfolio Health</h3>
+                    <div className="text-3xl font-bold text-white">{portfolioStats.portfolioValue}</div>
+                </div>
+
+                {/* Stat 2: Daily Change */}
+                <div className="bg-surface p-6 rounded-xl border border-gray-700 shadow-lg relative overflow-hidden group hover:border-success/50 transition-colors">
+                    <div className="flex items-center gap-3 text-gray-400 mb-2">
+                        <Activity size={20} className="text-success" />
+                        <span className="font-medium">All-Time Return</span>
                     </div>
-                    <div className="text-3xl font-bold text-white mb-1">{stats.portfolioValue}</div>
-                    <div className="text-success text-sm bg-success/10 inline-block px-2 py-1 rounded">
-                        {stats.dailyChange} Today
+                    <div className={`text-3xl font-bold ${portfolioStats.isPositive ? 'text-success' : 'text-danger'}`}>
+                        {portfolioStats.dailyChange}
                     </div>
                 </div>
 
-                {/* Widget 2: Action Items */}
+                {/* Stat 3: Total Gain/Loss */}
+                <div className="bg-surface p-6 rounded-xl border border-gray-700 shadow-lg relative overflow-hidden group hover:border-yellow-500/50 transition-colors">
+                    <div className="flex items-center gap-3 text-gray-400 mb-2">
+                        <AlertTriangle size={20} className="text-yellow-500" />
+                        <span className="font-medium">Total Gain/Loss</span>
+                    </div>
+                    <div className={`text-3xl font-bold ${portfolioStats.isPositive ? 'text-success' : 'text-danger'}`}>
+                        {portfolioStats.totalGainLoss}
+                    </div>
+                </div>
+            </div>
+
+            {/* Widgets Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Widget 1: Smart Alerts */}
                 <div className="bg-surface p-6 rounded-xl border border-gray-700 shadow-lg hover:border-accent/50 transition-colors">
                     <div className="flex items-center gap-2 mb-4">
                         <AlertTriangle className="text-accent" size={20} />
@@ -127,21 +156,21 @@ const Dashboard = () => {
                     </div>
                     <div className="space-y-3">
                         {alerts.length === 0 ? (
-                            <p className="text-gray-500 text-sm">No active alerts</p>
+                            <p className="text-gray-500 text-sm py-4">No active alerts</p>
                         ) : (
                             alerts.slice(0, 3).map((alert) => (
                                 <div
                                     key={alert.id}
                                     onClick={() => handleAlertClick(alert.id)}
-                                    className="flex justify-between items-start border-b border-gray-700 pb-2 last:border-0 cursor-pointer hover:bg-gray-800 p-2 rounded transition-colors"
+                                    className="flex justify-between items-start border-b border-gray-700 pb-3 last:border-0 cursor-pointer hover:bg-white/5 p-2 rounded-lg transition-colors"
                                 >
                                     <div>
                                         <span className="text-white font-semibold">{alert.ticker}</span>
-                                        <p className="text-xs text-gray-400">{alert.message}</p>
+                                        <p className="text-xs text-gray-400 mt-0.5">{alert.message}</p>
                                     </div>
-                                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${alert.severity === 'HIGH' ? 'text-red-400 bg-red-500/10' :
-                                            alert.severity === 'MEDIUM' ? 'text-yellow-500 bg-yellow-500/10' :
-                                                'text-gray-400 bg-gray-500/10'
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${alert.severity === 'HIGH' ? 'text-red-400 bg-red-400/10' :
+                                        alert.severity === 'MEDIUM' ? 'text-yellow-500 bg-yellow-500/10' :
+                                            'text-gray-400 bg-gray-400/10'
                                         }`}>{alert.severity}</span>
                                 </div>
                             ))
@@ -179,6 +208,9 @@ const Dashboard = () => {
                                                     })()}
                                                 </span>
                                             </div>
+                                            <div className="text-[10px] text-gray-500 font-medium truncate max-w-[120px]">
+                                                {rec.company_name}
+                                            </div>
                                             <span className={`text-xs px-1.5 py-0.5 rounded font-bold ${rec.action === 'BUY' ? 'bg-green-500/20 text-green-400' : rec.action === 'SELL' ? 'bg-red-500/20 text-red-400' : 'bg-gray-500/20 text-gray-400'}`}>
                                                 {rec.action}
                                             </span>
@@ -188,7 +220,19 @@ const Dashboard = () => {
                                             <span className="text-[10px] text-gray-500">Score</span>
                                         </div>
                                     </div>
-                                    <p className="text-xs text-gray-400 line-clamp-2">{rec.reasoning}</p>
+                                    <div className="flex flex-col gap-1">
+                                        <p className="text-xs text-gray-400 line-clamp-2">{rec.reasoning}</p>
+                                        {rec.source_news_url && (
+                                            <a
+                                                href={rec.source_news_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-[10px] text-primary hover:text-white transition-colors w-fit flex items-center gap-1"
+                                            >
+                                                Source News →
+                                            </a>
+                                        )}
+                                    </div>
                                 </div>
                             ))}
                         </div>

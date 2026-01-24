@@ -126,6 +126,10 @@ class AnalysisService:
         except Exception as e:
             reason = f"Parse Error: {str(e)} raw: {response[:20]}..."
 
+        # Prepare metadata
+        company_name = financials.get("company_name", "Unknown")
+        source_news_url = news_items[0].get("url") if news_items else None
+
         # 5. Save to DB
         # Archive previous active recommendations for this ticker (Bulk Update)
         statement = update(Recommendation).where(
@@ -138,12 +142,14 @@ class AnalysisService:
         # Create new recommendation
         rec = Recommendation(
             ticker=ticker,
+            company_name=company_name,
             action=action,
             confidence_score=score,
             reasoning=reason,
             date_generated=datetime.utcnow(),
             is_active=True,
-            user_id=user_id
+            user_id=user_id,
+            source_news_url=source_news_url
         )
         self.session.add(rec)
         self.session.commit()

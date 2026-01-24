@@ -18,4 +18,17 @@ api.interceptors.request.use(
     }
 );
 
+// Add a response interceptor to handle 401s
+api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (error.response && error.response.status === 401) {
+            // Token is likely expired or invalid (e.g. after a DB reset)
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        }
+        return Promise.reject(error);
+    }
+);
+
 export default api;

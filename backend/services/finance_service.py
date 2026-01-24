@@ -18,6 +18,7 @@ class FinanceService:
             info = stock.info
             
             return {
+                "company_name": info.get("longName", "Unknown"),
                 "pe_ratio": info.get("trailingPE", "N/A"),
                 "forward_pe": info.get("forwardPE", "N/A"),
                 "debt_to_equity": info.get("debtToEquity"),
