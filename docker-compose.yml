@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: stock_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: stock_app
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - stock_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d stock_app"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: stock_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - stock_net
+    # Deploy section for GPU support if available on host (commented out for broad compatibility)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  backend:
+    build: ./backend
+    container_name: stock_backend
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/stock_app
+      - OLLAMA_HOST=http://ollama:11434
+      - SECRET_KEY=supersecretkeychangeinproduction
+      - LLM_PROVIDER=ollama
+      - LLM_MODEL=llama3.2
+      - LLM_API_KEY=
+      - ENABLE_SCHEDULED_SCAN=true
+      - SCAN_SCHEDULE=0 6 * * 0
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - stock_net
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+networks:
+  stock_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  ollama_data:
