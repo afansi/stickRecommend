@@ -1,6 +1,6 @@
 import yfinance as yf
 import pandas as pd
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from config import SECTOR_2_ETF_MAP
 
 from utils.cache import ttl_cache

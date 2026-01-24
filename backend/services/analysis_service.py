@@ -130,7 +130,7 @@ class AnalysisService:
         # Archive previous active recommendations for this ticker (Bulk Update)
         statement = update(Recommendation).where(
             Recommendation.ticker == ticker, 
-            Recommendation.is_active == True
+            Recommendation.is_active == True,
             Recommendation.user_id == user_id
         ).values(is_active=False)
         self.session.exec(statement)

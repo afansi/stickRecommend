@@ -1,9 +1,11 @@
 from sqlmodel import SQLModel, Session, create_engine
+from sqlalchemy.orm import sessionmaker
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/stock_app")
 
 engine = create_engine(DATABASE_URL, echo=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
     SQLModel.metadata.create_all(engine)
