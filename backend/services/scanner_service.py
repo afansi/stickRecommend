@@ -51,16 +51,46 @@ class ScannerService:
                 # Use cached
                 candidates = sector_db.top_holdings.split(",") if sector_db.top_holdings else []
 
-            # 3. Scan Candidates
-            for ticker in candidates:
-                if self._passes_technical_filter(ticker):
-                    # Trigger full analysis with user context
-                    print(f"Scanner: {ticker} passed filter. Analyzing for user {user_id}...")
-                    rec = self.analysis_service.analyze_ticker(ticker, user_id)
-                    results.append(rec)
-                else:
-                    print(f"Scanner: {ticker} skipped (Technical Filter).")
+            # 3. Batch fetch technicals for all candidates (MUCH more efficient)
+            if candidates:
+                print(f"Scanner: Batch fetching technicals for {len(candidates)} candidates...")
+                batch_technicals = self.finance_service.batch_get_technicals(candidates)
+                
+                # 4. Filter and analyze
+                for ticker in candidates:
+                    tech_data = batch_technicals.get(ticker)
+                    if tech_data and self._passes_technical_filter_from_data(tech_data):
+                        # Trigger full analysis with user context
+                        print(f"Scanner: {ticker} passed filter. Analyzing for user {user_id}...")
+                        rec = self.analysis_service.analyze_ticker(ticker, user_id)
+                        results.append(rec)
+                    else:
+                        print(f"Scanner: {ticker} skipped (Technical Filter).")
         return results
+
+    def _passes_technical_filter_from_data(self, tech_data: dict) -> bool:
+        """
+        Cheap Gatekeeper using pre-fetched technical data.
+        """
+        if not tech_data:
+            return False
+            
+        rsi = tech_data.get("rsi_14")
+        trend = tech_data.get("trend")
+        
+        # Rule 1: Oversold (Dip Opportunity)
+        if rsi and rsi < 35:
+            return True
+            
+        # Rule 2: Strong Momentum
+        if rsi and rsi > 65:
+            return True
+            
+        # Rule 3: Clear Uptrend
+        if trend == "UP":
+            return True
+            
+        return False
 
     def _passes_technical_filter(self, ticker: str) -> bool:
         """

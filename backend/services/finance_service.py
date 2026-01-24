@@ -4,17 +4,22 @@ from typing import Dict, Optional, List
 from config import SECTOR_2_ETF_MAP
 
 from utils.cache import ttl_cache
+from utils.rate_limiter import yahoo_rate_limiter
 
 class FinanceService:
-    @ttl_cache(ttl=3600) # 1 Hour Cache
+    @ttl_cache(ttl=86400)  # 24 Hour Cache (increased from 1h to reduce API calls)
     def get_financials(self, ticker: str) -> Dict:
-        """Fetch fundamental data."""
+        """
+        Fetch fundamental data (P/E, EPS, etc.)
+        """
         try:
+            yahoo_rate_limiter.wait_if_needed()  # Rate limit protection
             stock = yf.Ticker(ticker)
             info = stock.info
+            
             return {
-                "pe_ratio": info.get("trailingPE"),
-                "peg_ratio": info.get("pegRatio"),
+                "pe_ratio": info.get("trailingPE", "N/A"),
+                "forward_pe": info.get("forwardPE", "N/A"),
                 "debt_to_equity": info.get("debtToEquity"),
                 "earnings_growth": info.get("earningsGrowth"),
                 "revenue_growth": info.get("revenueGrowth"),
@@ -24,12 +29,15 @@ class FinanceService:
             print(f"Error fetching financials for {ticker}: {e}")
             return {}
 
-    @ttl_cache(ttl=900) # 15 Mins Cache (Technicals move faster)
+    @ttl_cache(ttl=14400)  # 4 Hour Cache (technicals change slower)
     def get_technicals(self, ticker: str) -> Dict:
-        """Fetch technical indicators (RSI, MA50)."""
+        """
+        Calculate technical indicators (RSI, MA50, Trend)
+        """
         try:
+            yahoo_rate_limiter.wait_if_needed()  # Rate limit protection
+            # Fetch 3 months of data for MA50
             stock = yf.Ticker(ticker)
-            # Fetch last 3 months data for indicators
             hist = stock.history(period="3mo")
             if hist.empty:
                 return {}
@@ -95,10 +103,13 @@ class FinanceService:
         except Exception as e:
             return {}
 
-    @ttl_cache(ttl=43200) # 12 Hours
+    @ttl_cache(ttl=86400) # 24 Hour Cache (earnings dates don't change often)
     def get_next_earnings_date(self, ticker: str) -> Optional[str]:
-        """Fetch next earnings date for run-up strategy."""
+        """
+        Get next earnings date
+        """
         try:
+            yahoo_rate_limiter.wait_if_needed()  # Rate limit protection
             stock = yf.Ticker(ticker)
             calendar = stock.calendar
             # calendar is a dict, keys include 'Earnings Date' (list) or 'Earnings High', etc.
