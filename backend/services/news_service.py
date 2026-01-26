@@ -44,12 +44,21 @@ class NewsService:
                     dt = dparser.parse(pub_date_str)
                     timestamp = int(dt.timestamp())
                 
+                # Safer navigation of yfinance nested dicts
+                def safe_get(d, keys, default=None):
+                    for k in keys:
+                        if isinstance(d, dict):
+                            d = d.get(k)
+                        else:
+                            return default
+                    return d if d is not None else default
+
                 normalized.append({
                     "title": content.get("title", "No Title"),
-                    "link": content.get("clickThroughUrl", {}).get("url") or content.get("canonicalUrl", {}).get("url"),
-                    "publisher": content.get("provider", {}).get("displayName", "Finance News"),
+                    "link": safe_get(content, ["clickThroughUrl", "url"]) or safe_get(content, ["canonicalUrl", "url"]) or "https://finance.yahoo.com",
+                    "publisher": safe_get(content, ["provider", "displayName"], "Finance News"),
                     "providerPublishTime": timestamp,
-                    "relatedTickers": [t.get("symbol") for t in content.get("finance", {}).get("stockTickers", [])] if content.get("finance") else []
+                    "relatedTickers": [t.get("symbol") for t in safe_get(content, ["finance", "stockTickers"], []) if t and isinstance(t, dict)]
                 })
             except Exception as e:
                 print(f"Error normalizing news item: {e}")

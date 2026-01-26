@@ -1,14 +1,10 @@
+import concurrent.futures
 from sqlmodel import Session, select, update
 from datetime import datetime
 from services.news_service import NewsService
 from services.llm_engine import LLMFactory
 from models.tables import Recommendation, NewsArticle
-
 from config import settings
-
-class AnalysisService:
-    def __init__(self, session: Session):
-        self.session = session
 from services.finance_service import FinanceService
 
 class AnalysisService:
@@ -25,106 +21,121 @@ class AnalysisService:
 
     def analyze_ticker(self, ticker: str, user_id: int) -> Recommendation:
         """
-        Hybrid Analysis Pipeline:
-        1. News (Sentiment)
-        2. Financials (Fundamentals: P/E, EPS)
-        3. Technicals (RSI, MA50)
-        4. LLM Synthesis -> Recommendation
+        Hybrid Analysis Pipeline (Optimized):
+        Concurrent fetching of News, Financials, Technicals, and Sector data.
+        Includes a Freshness Check to prevent redundant LLM calls.
         """
-        # 1. Fetch Data
-        news_items = self.news_service.fetch_news(ticker)
-        financials = self.finance_service.get_financials(ticker)
-        technicals = self.finance_service.get_technicals(ticker)
-        earnings_date = self.finance_service.get_next_earnings_date(ticker)
-        
-        # Determine Sector dynamically
-        sector_info = self.finance_service.get_stock_sector(ticker)
+        # 0. Freshness Check (Don't re-analyze if we have a fresh one < 1 hour old)
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=1)
+        existing_rec = self.session.exec(
+            select(Recommendation).where(
+                Recommendation.ticker == ticker,
+                Recommendation.user_id == user_id,
+                Recommendation.is_active == True,
+                Recommendation.date_generated > cutoff
+            )
+        ).first()
+
+        if existing_rec:
+            print(f"📦 AnalysisService: Returning fresh cached recommendation for {ticker}")
+            return existing_rec
+
+        print(f"🚀 AnalysisService: Starting optimized analysis for {ticker}...")
+        start_time = datetime.utcnow()
+
+        # Wave 1: Fetch Ticker-specific data in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            ticker_news_future = executor.submit(self.news_service.fetch_news, ticker)
+            financials_future = executor.submit(self.finance_service.get_financials, ticker)
+            technicals_future = executor.submit(self.finance_service.get_technicals, ticker)
+            earnings_future = executor.submit(self.finance_service.get_next_earnings_date, ticker)
+            sector_info_future = executor.submit(self.finance_service.get_stock_sector, ticker)
+
+            news_items = ticker_news_future.result()
+            financials = financials_future.result()
+            technicals = technicals_future.result()
+            earnings_date = earnings_future.result()
+            sector_info = sector_info_future.result()
+
+        # Wave 2: Fetch Sector-specific data in parallel
         sector_etf = sector_info.get("etf", "SPY")
         sector_name = sector_info.get("name", "Unknown")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            sector_perf_future = executor.submit(self.finance_service.get_sector_performance, sector_etf)
+            sector_news_future = executor.submit(self.news_service.fetch_news, sector_etf)
+
+            sector_perf = sector_perf_future.result()
+            sector_news = sector_news_future.result()
+
+        print(f"✅ AnalysisService: Data gathering complete in {(datetime.utcnow() - start_time).total_seconds():.2f}s")
         
-        sector_perf = self.finance_service.get_sector_performance(sector_etf)
-        
-        # Fetch Sector News (Macro Context)
-        sector_news = self.news_service.fetch_news(sector_etf)
-        
-        # 2. Build Context
-        context = f"--- STOCK DATA FOR {ticker} ---\n\n"
-        
-        # Add Financials & Earnings
-        context += "FUNDAMENTALS:\n"
-        for k, v in financials.items():
-            context += f"- {k}: {v}\n"
+        # 2. Build Context (Streamlined)
+        context = f"--- STOCK DATA FOR {ticker} ---\n"
+        context += f"FINANCIALS: {financials}\n"
         if earnings_date:
-            context += f"- Next Earnings Date: {earnings_date} (Potential Run-up Play?)\n"
-        
-        # Add Technicals
-        context += "\nTECHNICALS:\n"
-        for k, v in technicals.items():
-            context += f"- {k}: {v}\n"
+            context += f"Earnings: {earnings_date}\n"
+        context += f"TECHNICALS: {technicals}\n"
+        context += f"SECTOR: {sector_name} ({sector_perf})\n"
+        context += f"TICKER NEWS: {[n.get('title') for n in news_items[:3]]}\n"
+        context += f"SECTOR NEWS: {[n.get('title') for n in sector_news[:2]]}\n"
 
-        # Add Sector Momentum
-        if sector_perf:
-            context += "\nSECTOR MOMENTUM (vs SPY):\n"
-            context += f"- 1 Mo Return: {sector_perf.get('sector_return_1mo')}%\n"
-            context += f"- Market Return: {sector_perf.get('market_return_1mo')}%\n"
-            context += f"- Status: {sector_perf.get('relative_strength')}\n"
-            
-        # Add News (Specific)
-        context += "\nRECENT NEWS (Specific to Ticker):\n"
-        if news_items:
-            for item in news_items[:5]:
-                context += f"- {item.get('title')} ({item.get('providerPublishTime')})\n"
-        else:
-            context += "(No recent news found)\n"
-
-        # Add News (Sector)
-        context += f"\nSECTOR NEWS ({sector_name}/{sector_etf}):\n"
-        if sector_news:
-            for item in sector_news[:3]: # Top 3 sector stories
-                context += f"- {item.get('title')}\n"
-        else:
-             context += "(No sector news found)\n"
-
-        # 3. Hybrid Strategy Prompt
+        # 3. Hybrid Strategy Prompt (Focused)
         prompt = f"""
-        You are a sophisticated financial analyst using a Hybrid Strategy.
-        Analyze the provided data for {ticker}.
+        Act as a professional financial analyst. Analyze {ticker} using a Hybrid Strategy:
         
-        STRATEGY RULES:
-        1. FUNDAMENTALS: Check if P/E and PEG indicate value. Growth metrics should be positive.
-        2. TECHNICALS: RSI < 30 is Oversold (Potential Buy), RSI > 70 is Overbought. MA50 indicates trend.
-        3. SECTOR ROTATION: If Sector is a "LEADER", favor the stock (Momentum). If "LAGGARD", be cautious.
-        4. EARNINGS RUN-UP: If Earnings Date is approaching (within 2-3 weeks), look for "Run-up" potential.
-        5. NEWS: Look for catalysts.
+        1. FUNDAMENTALS: Value/Growth metrics.
+        2. TECHNICALS: RSI/Trend (UP/DOWN).
+        3. MOMENTUM: Sector performance vs Market.
+        4. CATALYSTS: Recent news and upcoming earnings.
         
-        Synthesize all factors into a Recommendation.
+        Synthesize into ACTION (BUY/SELL/HOLD), SCORE (0-10), and REASON (max 40 words).
         
-        Format your response exactly like this:
-        ACTION: [BUY/SELL/HOLD]
-        SCORE: [0-10]
-        REASON: [Your concise analysis weighting all 5 factors, max 50 words]
+        Format:
+        ACTION: [Action]
+        SCORE: [Score]
+        REASON: [Short reasoning]
         """
         
         # 4. Call LLM
         response = self.llm.analyze_text(text=context, prompt=prompt)
         
-        # 5. Parse Response
+        # 5. Robust Parse Response (Regex)
+        import re
         action = "HOLD"
         score = 5.0
-        reason = "Analysis failed parse"
+        reason = "Analysis synthesis failed"
 
-        
         try:
-            lines = response.split('\n')
-            for line in lines:
-                if "ACTION:" in line:
-                    action = line.split("ACTION:")[1].strip().upper()
-                if "SCORE:" in line:
-                    score = float(line.split("SCORE:")[1].strip())
-                if "REASON:" in line:
-                    reason = line.split("REASON:")[1].strip()
+            # Extract Action (BUY/SELL/HOLD)
+            action_match = re.search(r"ACTION:\s*(\*\*)*(BUY|SELL|HOLD)(\*\*)*", response, re.IGNORECASE)
+            if action_match:
+                action = action_match.group(2).upper()
+
+            # Extract Score (Handles decimals, markdown, etc.)
+            score_match = re.search(r"SCORE:\s*(\*\*)*(\d+\.?\d*)(\*\*)*", response)
+            if score_match:
+                score = float(score_match.group(2))
+
+            # Extract Reason (Matches everything after REASON: until end of line or next field)
+            reason_match = re.search(r"REASON:\s*(.*)", response, re.DOTALL | re.IGNORECASE)
+            if reason_match:
+                reason = reason_match.group(1).strip().strip('*').strip()
+                # Clean up if reason contains subsequent fields (unlikely with DOTALL but safer)
+                reason = reason.split('\n')[0][:200] 
+
+            print(f"🎯 Parser: Regex Success [{ticker}] -> {action} ({score})")
+            
+            # Final sanity check: if reason is still default, take whatever response we got
+            if (reason == "Analysis synthesis failed" or not reason) and response:
+                print(f"⚠️ Parser: Reason missing, extracting fallback block for {ticker}")
+                # Take the first 300 chars of the cleaned response
+                reason = response.strip().replace('\n', ' ')[:300]
+                
         except Exception as e:
-            reason = f"Parse Error: {str(e)} raw: {response[:20]}..."
+            print(f"❌ Parser: Regex Failed [{ticker}]: {e} | Raw Response: {response}")
+            reason = f"Parse fallback: {response[:100]}..."
 
         # Prepare metadata
         company_name = financials.get("company_name", "Unknown")
@@ -154,5 +165,13 @@ class AnalysisService:
         self.session.add(rec)
         self.session.commit()
         self.session.refresh(rec)
+        
+        # 6. Generate Alert (Immediate Context)
+        from services.alert_service import AlertService
+        alert_service = AlertService(self.session)
+        alert_service.generate_alerts_from_recommendations(user=None, recommendations=[rec]) # AlertService will handle user_id from rec
+
+        total_duration = (datetime.utcnow() - start_time).total_seconds()
+        print(f"🏁 AnalysisService: COMPLETED analysis for {ticker} in {total_duration:.2f}s")
         
         return rec

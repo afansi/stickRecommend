@@ -82,14 +82,25 @@ class AlertService:
         alerts = []
         
         for rec in recommendations:
-            if rec.confidence_score >= 8.5 and rec.action in ["BUY", "SELL"]:
+            # BROADENED: Lower threshold to 8.0 + Include high-confidence HOLDs
+            if rec.confidence_score >= 8.0:
                 severity = "HIGH" if rec.confidence_score >= 9.0 else "MEDIUM"
                 
-                action_text = "Strong Buy" if rec.action == "BUY" else "Sell Signal"
+                if rec.action == "BUY":
+                    action_text = "Strong Buy"
+                elif rec.action == "SELL":
+                    action_text = "Sell Signal"
+                else:
+                    # High confidence but neutral (HOLD)
+                    if rec.confidence_score < 9.0: continue # Only alert for very sure HOLDs
+                    action_text = "Neutral Signal"
+
+                u_id = user.id if user else rec.user_id
+                
                 alert = Alert(
-                    user_id=user.id,
+                    user_id=u_id,
                     ticker=rec.ticker,
-                    message=f"{action_text} ({rec.confidence_score}/10): {rec.reasoning[:50]}...",
+                    message=f"{action_text} ({rec.confidence_score}/10): {rec.reasoning[:60]}...",
                     severity=severity
                 )
                 alerts.append(alert)

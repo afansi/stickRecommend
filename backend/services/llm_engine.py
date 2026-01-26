@@ -1,4 +1,5 @@
 import os
+import time
 from abc import ABC, abstractmethod
 import requests
 
@@ -19,11 +20,16 @@ class OllamaClient(LLMClient):
             "prompt": f"{prompt}\n\nContext:\n{text}",
             "stream": False
         }
+        start_time = time.time()
+        print(f"🤖 LLM: Sending request to Ollama ({self.model})...")
         try:
             response = requests.post(f"{self.host}/api/generate", json=payload)
             response.raise_for_status()
+            duration = time.time() - start_time
+            print(f"✅ LLM: Ollama responded in {duration:.2f}s")
             return response.json().get("response", "Error: No response from Ollama")
         except Exception as e:
+            print(f"❌ LLM: Ollama request failed after {time.time() - start_time:.2f}s: {e}")
             return f"Error contacting Ollama: {str(e)}"
 
 class CloudClient(LLMClient):
@@ -33,16 +39,23 @@ class CloudClient(LLMClient):
         self.model = model
     
     def analyze_text(self, text: str, prompt: str) -> str:
+        start_time = time.time()
+        print(f"☁️ LLM: Sending request to {self.provider} ({self.model})...")
         provider = self.provider.lower()
+        
+        res = "Provider not implemented."
         if provider == "openai":
-            return self._call_openai(text, prompt)
+            res = self._call_openai(text, prompt)
         elif provider == "anthropic":
-            return self._call_anthropic(text, prompt)
+            res = self._call_anthropic(text, prompt)
         elif provider == "gemini":
-            return self._call_gemini(text, prompt)
+            res = self._call_gemini(text, prompt)
         elif provider == "deepseek":
-            return self._call_deepseek(text, prompt)
-        return f"Provider {self.provider} not implemented yet."
+            res = self._call_deepseek(text, prompt)
+            
+        duration = time.time() - start_time
+        print(f"✅ LLM: {self.provider} responded in {duration:.2f}s")
+        return res
 
     def _call_openai(self, text: str, prompt: str) -> str:
         url = "https://api.openai.com/v1/chat/completions"

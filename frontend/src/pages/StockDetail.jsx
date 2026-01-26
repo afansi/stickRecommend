@@ -8,7 +8,11 @@ const StockDetail = () => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
 
+    const hasFetched = React.useRef(false);
     useEffect(() => {
+        if (hasFetched.current) return;
+        hasFetched.current = true;
+
         const fetchAnalysis = async () => {
             try {
                 const res = await api.post(`/analysis/${ticker}`);
@@ -39,8 +43,8 @@ const StockDetail = () => {
                 </div>
                 {data && (
                     <div className={`px-4 py-2 rounded-lg border ${data.action === 'BUY' ? 'bg-success/20 border-success text-success' :
-                            data.action === 'SELL' ? 'bg-danger/20 border-danger text-danger' :
-                                'bg-yellow-500/20 border-yellow-500 text-yellow-500'
+                        data.action === 'SELL' ? 'bg-danger/20 border-danger text-danger' :
+                            'bg-yellow-500/20 border-yellow-500 text-yellow-500'
                         }`}>
                         <div className="text-xs font-bold uppercase tracking-wider">Bot Recommendation</div>
                         <div className="text-2xl font-bold">{data.action}</div>

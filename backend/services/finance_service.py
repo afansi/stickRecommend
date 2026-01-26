@@ -7,28 +7,45 @@ from utils.cache import ttl_cache
 from utils.rate_limiter import yahoo_rate_limiter
 
 class FinanceService:
-    @ttl_cache(ttl=86400)  # 24 Hour Cache (increased from 1h to reduce API calls)
-    def get_financials(self, ticker: str) -> Dict:
+    @ttl_cache(ttl=86400)
+    def get_stock_metadata(self, ticker: str) -> Dict:
         """
-        Fetch fundamental data (P/E, EPS, etc.)
+        Fetch all metadata (financials + sector) in one go to save API calls.
         """
         try:
-            yahoo_rate_limiter.wait_if_needed()  # Rate limit protection
+            yahoo_rate_limiter.wait_if_needed()
             stock = yf.Ticker(ticker)
             info = stock.info
             
+            sector_name = info.get('sector', 'Unknown')
+            etf = SECTOR_2_ETF_MAP.get(sector_name, "SPY")
+
             return {
-                "company_name": info.get("longName", "Unknown"),
-                "pe_ratio": info.get("trailingPE", "N/A"),
-                "forward_pe": info.get("forwardPE", "N/A"),
-                "debt_to_equity": info.get("debtToEquity"),
-                "earnings_growth": info.get("earningsGrowth"),
-                "revenue_growth": info.get("revenueGrowth"),
-                "current_price": info.get("currentPrice")
+                "financials": {
+                    "company_name": info.get("longName", "Unknown"),
+                    "pe_ratio": info.get("trailingPE", "N/A"),
+                    "forward_pe": info.get("forwardPE", "N/A"),
+                    "debt_to_equity": info.get("debtToEquity"),
+                    "earnings_growth": info.get("earningsGrowth"),
+                    "revenue_growth": info.get("revenueGrowth"),
+                    "current_price": info.get("currentPrice")
+                },
+                "sector": {
+                    "name": sector_name,
+                    "etf": etf
+                }
             }
         except Exception as e:
-            print(f"Error fetching financials for {ticker}: {e}")
-            return {}
+            print(f"Error fetching metadata for {ticker}: {e}")
+            return {"financials": {}, "sector": {"name": "Unknown", "etf": "SPY"}}
+
+    def get_financials(self, ticker: str) -> Dict:
+        """Deprecated: Use get_stock_metadata"""
+        return self.get_stock_metadata(ticker).get("financials", {})
+
+    def get_stock_sector(self, ticker: str) -> Dict[str, str]:
+        """Deprecated: Use get_stock_metadata"""
+        return self.get_stock_metadata(ticker).get("sector", {})
 
     @ttl_cache(ttl=14400)  # 4 Hour Cache (technicals change slower)
     def get_technicals(self, ticker: str) -> Dict:
@@ -62,6 +79,22 @@ class FinanceService:
         except Exception as e:
             print(f"Error fetching technicals for {ticker}: {e}")
             return {}
+    @ttl_cache(ttl=3600)
+    def get_market_performance(self, ticker: str = "SPY") -> float:
+        """
+        Get 1-month return for the market proxy (SPY).
+        Cached independently to prevent redundant fetches across different sectors.
+        """
+        try:
+            yahoo_rate_limiter.wait_if_needed()
+            spy = yf.Ticker(ticker)
+            spy_hist = spy.history(period="1mo")
+            if spy_hist.empty:
+                return 0.0
+            return (spy_hist['Close'].iloc[-1] - spy_hist['Close'].iloc[0]) / spy_hist['Close'].iloc[0]
+        except Exception as e:
+            print(f"Error fetching market performance: {e}")
+            return 0.0
 
     @ttl_cache(ttl=3600)
     def get_sector_performance(self, sector_etf: str) -> Dict:
@@ -75,18 +108,18 @@ class FinanceService:
                     "relative_strength": "NEUTRAL"
                 }
 
+            yahoo_rate_limiter.wait_if_needed()  # Rate limit protection
+
             sector = yf.Ticker(sector_etf)
-            spy = yf.Ticker("SPY")
             
-            # 1 Month Performance
+            # 1 Month Performance (Sector)
             sector_hist = sector.history(period="1mo")
-            spy_hist = spy.history(period="1mo")
-            
-            if sector_hist.empty or spy_hist.empty:
+            if sector_hist.empty:
                 return {}
 
+            # Use Cached Market Performance
+            spy_return = self.get_market_performance("SPY")
             sector_return = (sector_hist['Close'].iloc[-1] - sector_hist['Close'].iloc[0]) / sector_hist['Close'].iloc[0]
-            spy_return = (spy_hist['Close'].iloc[-1] - spy_hist['Close'].iloc[0]) / spy_hist['Close'].iloc[0]
             
             # Helper logic for Strength
             if sector_return > spy_return:
@@ -104,27 +137,32 @@ class FinanceService:
         except Exception as e:
             return {}
 
-    @ttl_cache(ttl=86400) # 24 Hour Cache (earnings dates don't change often)
+    @ttl_cache(ttl=86400) # 24 Hour Cache
     def get_next_earnings_date(self, ticker: str) -> Optional[str]:
         """
-        Get next earnings date
+        Get next earnings date safely handling both datetime and date objects.
         """
         try:
-            yahoo_rate_limiter.wait_if_needed()  # Rate limit protection
+            yahoo_rate_limiter.wait_if_needed()
             stock = yf.Ticker(ticker)
             calendar = stock.calendar
-            # calendar is a dict, keys include 'Earnings Date' (list) or 'Earnings High', etc.
-            # yfinance structure varies, safer to try parsing
+            
+            # Helper to safely get string date
+            def to_date_str(dt_obj):
+                if hasattr(dt_obj, 'date'):
+                    return str(dt_obj.date())
+                return str(dt_obj)
+
             if calendar and 'Earnings Date' in calendar:
                 dates = calendar['Earnings Date']
-                if dates:
-                    return str(dates[0].date())
-            # Fallback for newer yfinance versions where calendar is a dataframe
-            if hasattr(stock, 'earning_dates') and stock.earnings_dates is not None:
-                 # Find next future date
-                 future_dates = stock.earnings_dates.index[stock.earnings_dates.index > pd.Timestamp.now()]
+                if dates and len(dates) > 0:
+                    return to_date_str(dates[0])
+
+            # Fallback for newer yfinance versions
+            if hasattr(stock, 'earnings_dates') and stock.earnings_dates is not None:
+                 future_dates = stock.earnings_dates.index[stock.earnings_dates.index > pd.Timestamp.now(tz=None)]
                  if not future_dates.empty:
-                      return str(future_dates[-1].date()) # Closest future date
+                      return to_date_str(future_dates[0]) # Closest future date is the first in a filtered index
             return None
         except Exception as e:
             print(f"Error fetching earnings date for {ticker}: {e}")

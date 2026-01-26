@@ -45,7 +45,10 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql://user:password@db:5432/stock_app
-      - OLLAMA_HOST=http://ollama:11434
+      # CONFIGURATION OPTIONS:
+      # Case 1 (Mac/Windows): Use 'http://host.docker.internal:11434' to access your native GPU acceleration.
+      # Case 2 (Linux/Docker Only): Use 'http://ollama:11434' if running Ollama entirely inside the container.
+      - OLLAMA_HOST=http://host.docker.internal:11434
       - SECRET_KEY=supersecretkeychangeinproduction
       - LLM_PROVIDER=ollama
       - LLM_MODEL=llama3.2
@@ -55,6 +58,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # Ollama container remains available for non-GPU users
       ollama:
         condition: service_started
     networks:

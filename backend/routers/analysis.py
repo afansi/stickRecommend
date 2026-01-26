@@ -42,6 +42,14 @@ def trigger_scan(session: Session = Depends(get_session), current_user: User = D
         
     results = scanner.scan_active_sectors(sectors, current_user.id)
     
+    # Generate Alerts for new recommendations
+    from services.alert_service import AlertService
+    alert_service = AlertService(session)
+    alert_service.generate_alerts_from_recommendations(current_user, results)
+    
+    # Also check portfolio for any new alerts (Price/Earnings)
+    alert_service.generate_alerts_for_portfolio(current_user)
+    
     return {
         "status": "scan_complete", 
         "sectors_scanned": sectors,

@@ -17,11 +17,28 @@ A local-first, AI-powered Stock Recommendation App offering technical analysis, 
 *   **AI**: Ollama (Llama 3.2), Docker
 *   **Frontend**: React (Vite), TailwindCSS, Lucide Icons
 
+## 📋 Performance & Hardware Acceleration
+
+The AI Analysis performance depends heavily on where **Ollama** is running.
+
+### 🏎️ Case 1: MacOS / Apple Silicon (Recommended)
+**Speed: ~2-5 seconds per analysis**
+For high performance, run Ollama natively on your Mac to utilize the **Metal GPU**.
+1.  Download and install [Ollama for Mac](https://ollama.com).
+2.  Open the Ollama app or run `ollama serve`.
+3.  In `docker-compose.yml`, ensure `OLLAMA_HOST` is set to `http://host.docker.internal:11434` (This is the default).
+
+### 🐢 Case 2: Docker-only (Standard)
+**Speed: ~5-10 minutes per analysis**
+Use this if you don't want to install extra apps. The AI will run on your CPU inside the container.
+1.  In `docker-compose.yml`, change `OLLAMA_HOST` to `http://ollama:11434`.
+2.  The `stock_ollama` container will handle everything.
+
 ## 📋 Prerequisites
 
 *   **Docker** & **Docker Compose**
 *   **Node.js** v18+ & **npm**
-*   **Make** (Optional, for easy commands)
+*   **Ollama** (Optional, for high performance on Mac/Windows)
 
 ## ⚡ Quick Start
 
@@ -34,7 +51,7 @@ make up
 ```
 
 ### 2. Initialize the AI Model
-One-time setup to download the Llama 3.2 model size (approx 2GB).
+One-time setup to download the Llama 3.2 model size (approx 2GB). Only in Case 2 settings: Docker-only (Standard)
 *(Ensure containers are running first)*
 
 ```bash
