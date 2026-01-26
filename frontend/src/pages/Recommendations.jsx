@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../api';
 import { TrendingUp, AlertCircle, Clock } from 'lucide-react';
 
@@ -37,7 +38,9 @@ const Recommendations = () => {
                             <div className="flex justify-between items-start mb-4">
                                 <div>
                                     <div className="flex items-center gap-3">
-                                        <h3 className="text-2xl font-bold text-white">{rec.ticker}</h3>
+                                        <Link to={`/analysis/${rec.ticker}`} className="text-2xl font-bold text-white hover:text-primary transition-colors">
+                                            {rec.ticker}
+                                        </Link>
                                         <span className="text-gray-400 font-medium">{rec.company_name}</span>
                                         <span className={`px-2 py-1 rounded text-xs font-bold ${rec.action === 'BUY' ? 'bg-green-500/20 text-green-400' :
                                             rec.action === 'SELL' ? 'bg-red-500/20 text-red-400' :
@@ -62,7 +65,7 @@ const Recommendations = () => {
                                     <h4 className="text-sm font-semibold text-gray-300 mb-1 flex items-center gap-2">
                                         <TrendingUp size={16} className="text-accent" /> Analysis Summary
                                     </h4>
-                                    <p className="text-gray-400 text-sm leading-relaxed">
+                                    <p className="text-gray-400 text-sm leading-relaxed whitespace-pre-wrap">
                                         {rec.reasoning}
                                     </p>
                                 </div>

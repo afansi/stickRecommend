@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../api';
 import { TrendingUp, AlertTriangle, Activity, Radar } from 'lucide-react';
 
@@ -197,7 +198,7 @@ const Dashboard = () => {
                                     <div className="flex justify-between items-center mb-1">
                                         <div>
                                             <div className="flex items-center gap-2">
-                                                <h4 className="text-xl font-bold text-white">{rec.ticker}</h4>
+                                                <Link to={`/analysis/${rec.ticker}`} className="text-xl font-bold text-white hover:text-primary transition-colors">{rec.ticker}</Link>
                                                 <span className="text-[10px] text-gray-500">
                                                     {(() => {
                                                         const diff = (new Date() - new Date(rec.date_generated)) / 1000;

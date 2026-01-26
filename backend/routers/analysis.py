@@ -9,11 +9,28 @@ from services.analysis_service import AnalysisService
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
 @router.post("/{ticker}", response_model=Recommendation)
-def analyze_stock(ticker: str, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+def analyze_stock(
+    ticker: str, 
+    force_refresh: bool = False,
+    session: Session = Depends(get_session), 
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Analyze a stock or fetch existing analysis.
+    Set force_refresh=true to ignore cached results and trigger a fresh AI scan.
+    """
     service = AnalysisService(session)
-    # Check if analysis exists and is fresh? (Skipping for MVP, always re-analyze)
-    rec = service.analyze_ticker(ticker.upper(), current_user.id)
+    rec = service.analyze_ticker(ticker.upper(), current_user.id, force_refresh=force_refresh)
     return rec
+
+@router.get("/{ticker}/technicals")
+def get_technical_data(ticker: str, session: Session = Depends(get_session)):
+    """
+    Fetch live technical indicators for a ticker.
+    """
+    from services.finance_service import FinanceService
+    finance_service = FinanceService()
+    return finance_service.get_technicals(ticker.upper())
 
 @router.get("/recommendations", response_model=List[Recommendation])
 def get_recommendations(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):

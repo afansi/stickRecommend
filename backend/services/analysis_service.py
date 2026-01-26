@@ -19,29 +19,31 @@ class AnalysisService:
             model=settings.LLM_MODEL
         )
 
-    def analyze_ticker(self, ticker: str, user_id: int) -> Recommendation:
+    def analyze_ticker(self, ticker: str, user_id: int, force_refresh: bool = False) -> Recommendation:
         """
         Hybrid Analysis Pipeline (Optimized):
         Concurrent fetching of News, Financials, Technicals, and Sector data.
-        Includes a Freshness Check to prevent redundant LLM calls.
+        Includes a Freshness Check / Force Refresh toggle.
         """
-        # 0. Freshness Check (Don't re-analyze if we have a fresh one < 1 hour old)
-        from datetime import timedelta
-        cutoff = datetime.utcnow() - timedelta(hours=1)
+        # 0. Check for existing active recommendation
         existing_rec = self.session.exec(
             select(Recommendation).where(
                 Recommendation.ticker == ticker,
                 Recommendation.user_id == user_id,
-                Recommendation.is_active == True,
-                Recommendation.date_generated > cutoff
-            )
+                Recommendation.is_active == True
+            ).order_by(Recommendation.date_generated.desc())
         ).first()
 
-        if existing_rec:
-            print(f"📦 AnalysisService: Returning fresh cached recommendation for {ticker}")
+        # Logic: 
+        # - If force_refresh is FALSE and we have ANY active recommendation, return it.
+        # - If force_refresh is TRUE, we skip this and generate a new one.
+        if not force_refresh and existing_rec:
+            # We also check if it's very old (e.g., > 24h) we might consider it stale, 
+            # but per user request, we return previous results that support the recommendation.
+            print(f"📦 AnalysisService: Returning existing recommendation for {ticker}")
             return existing_rec
 
-        print(f"🚀 AnalysisService: Starting optimized analysis for {ticker}...")
+        print(f"🚀 AnalysisService: Starting fresh analysis for {ticker} (Force Refresh: {force_refresh})...")
         start_time = datetime.utcnow()
 
         # Wave 1: Fetch Ticker-specific data in parallel
@@ -71,31 +73,39 @@ class AnalysisService:
 
         print(f"✅ AnalysisService: Data gathering complete in {(datetime.utcnow() - start_time).total_seconds():.2f}s")
         
-        # 2. Build Context (Streamlined)
+        # 2. Build Context (Enhanced with Deep Technicals)
         context = f"--- STOCK DATA FOR {ticker} ---\n"
         context += f"FINANCIALS: {financials}\n"
         if earnings_date:
             context += f"Earnings: {earnings_date}\n"
-        context += f"TECHNICALS: {technicals}\n"
+        
+        # Breakdown Technicals for AI clarity
+        context += f"TECHNICALS:\n"
+        context += f"- RSI(14): {technicals.get('rsi_14')}\n"
+        context += f"- Trend: {technicals.get('trend')} (Price vs MA50/MA200)\n"
+        context += f"- MACD: {technicals.get('macd')}\n"
+        context += f"- Bollinger Bands: {technicals.get('bollinger')}\n"
+        
         context += f"SECTOR: {sector_name} ({sector_perf})\n"
         context += f"TICKER NEWS: {[n.get('title') for n in news_items[:3]]}\n"
         context += f"SECTOR NEWS: {[n.get('title') for n in sector_news[:2]]}\n"
 
-        # 3. Hybrid Strategy Prompt (Focused)
+        # 3. Hybrid Strategy Prompt (Professional Grade)
         prompt = f"""
         Act as a professional financial analyst. Analyze {ticker} using a Hybrid Strategy:
         
-        1. FUNDAMENTALS: Value/Growth metrics.
-        2. TECHNICALS: RSI/Trend (UP/DOWN).
-        3. MOMENTUM: Sector performance vs Market.
-        4. CATALYSTS: Recent news and upcoming earnings.
+        1. FUNDAMENTALS: Value/Growth/Debt health.
+        2. TREND: Is price above MA200/MA50? (BULLISH/BEARISH/NEUTRAL).
+        3. MOMENTUM (MACD): Is the MACD Histogram positive? Check for crossovers.
+        4. VOLATILITY (BB): Is price near Upper Band (Overextended) or Lower Band (Oversold)?
+        5. SENTIMENT/CATALYSTS: News and Earnings impact.
         
-        Synthesize into ACTION (BUY/SELL/HOLD), SCORE (0-10), and REASON (max 40 words).
+        Synthesize into ACTION (BUY/SELL/HOLD), SCORE (0-10), and REASON (max 100 words).
         
         Format:
         ACTION: [Action]
         SCORE: [Score]
-        REASON: [Short reasoning]
+        REASON: [Balanced reasoning weighting all factors]
         """
         
         # 4. Call LLM
@@ -122,16 +132,16 @@ class AnalysisService:
             reason_match = re.search(r"REASON:\s*(.*)", response, re.DOTALL | re.IGNORECASE)
             if reason_match:
                 reason = reason_match.group(1).strip().strip('*').strip()
-                # Clean up if reason contains subsequent fields (unlikely with DOTALL but safer)
-                reason = reason.split('\n')[0][:200] 
+                # Allow multi-line and increase character limit for deeper context
+                reason = reason[:1000] 
 
             print(f"🎯 Parser: Regex Success [{ticker}] -> {action} ({score})")
             
             # Final sanity check: if reason is still default, take whatever response we got
             if (reason == "Analysis synthesis failed" or not reason) and response:
                 print(f"⚠️ Parser: Reason missing, extracting fallback block for {ticker}")
-                # Take the first 300 chars of the cleaned response
-                reason = response.strip().replace('\n', ' ')[:300]
+                # Take the first 1000 chars of the cleaned response
+                reason = response.strip()[:1000]
                 
         except Exception as e:
             print(f"❌ Parser: Regex Failed [{ticker}]: {e} | Raw Response: {response}")

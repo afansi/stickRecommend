@@ -47,34 +47,62 @@ class FinanceService:
         """Deprecated: Use get_stock_metadata"""
         return self.get_stock_metadata(ticker).get("sector", {})
 
-    @ttl_cache(ttl=14400)  # 4 Hour Cache (technicals change slower)
+    @ttl_cache(ttl=14400)  # 4 Hour Cache
     def get_technicals(self, ticker: str) -> Dict:
         """
-        Calculate technical indicators (RSI, MA50, Trend)
+        Calculate technical indicators (RSI, MACD, Bollinger Bands, Moving Averages)
         """
         try:
-            yahoo_rate_limiter.wait_if_needed()  # Rate limit protection
-            # Fetch 3 months of data for MA50
+            yahoo_rate_limiter.wait_if_needed()
+            # Fetch 1 year of data to support MA200 and long-term trends
             stock = yf.Ticker(ticker)
-            hist = stock.history(period="3mo")
+            hist = stock.history(period="1y")
             if hist.empty:
                 return {}
             
-            # Simple Moving Average (50)
-            ma50 = hist['Close'].rolling(window=50).mean().iloc[-1]
+            close = hist['Close']
             
-            # RSI Calculation
-            delta = hist['Close'].diff()
+            # 1. Moving Averages
+            ma50 = close.rolling(window=50).mean().iloc[-1]
+            ma200 = close.rolling(window=200).mean().iloc[-1]
+            current_price = close.iloc[-1]
+            
+            # 2. RSI Calculation
+            delta = close.diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
             current_rsi = rsi.iloc[-1]
             
+            # 3. MACD Calculation
+            ema12 = close.ewm(span=12, adjust=False).mean()
+            ema26 = close.ewm(span=26, adjust=False).mean()
+            macd_line = ema12 - ema26
+            signal_line = macd_line.ewm(span=9, adjust=False).mean()
+            
+            # 4. Bollinger Bands (20-day)
+            bb_middle = close.rolling(window=20).mean()
+            bb_std = close.rolling(window=20).std()
+            bb_upper = bb_middle + (bb_std * 2)
+            bb_lower = bb_middle - (bb_std * 2)
+            
             return {
+                "current_price": round(current_price, 2),
                 "rsi_14": round(current_rsi, 2) if not pd.isna(current_rsi) else None,
                 "ma_50": round(ma50, 2) if not pd.isna(ma50) else None,
-                "trend": "UP" if hist['Close'].iloc[-1] > ma50 else "DOWN"
+                "ma_200": round(ma200, 2) if not pd.isna(ma200) else None,
+                "macd": {
+                    "line": round(macd_line.iloc[-1], 3),
+                    "signal": round(signal_line.iloc[-1], 3),
+                    "histogram": round(macd_line.iloc[-1] - signal_line.iloc[-1], 3)
+                },
+                "bollinger": {
+                    "upper": round(bb_upper.iloc[-1], 2),
+                    "middle": round(bb_middle.iloc[-1], 2),
+                    "lower": round(bb_lower.iloc[-1], 2)
+                },
+                "trend": "BULLISH" if current_price > ma50 and current_price > ma200 else "BEARISH" if current_price < ma50 else "NEUTRAL"
             }
         except Exception as e:
             print(f"Error fetching technicals for {ticker}: {e}")
