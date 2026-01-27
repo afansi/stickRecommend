@@ -7,7 +7,7 @@ from utils.cache import ttl_cache
 from utils.rate_limiter import yahoo_rate_limiter
 
 class FinanceService:
-    @ttl_cache(ttl=86400)
+    @ttl_cache(ttl=86400) # 24 Hours (Sectors rarely change)
     def get_stock_metadata(self, ticker: str) -> Dict:
         """
         Fetch all metadata (financials + sector) in one go to save API calls.
@@ -195,28 +195,6 @@ class FinanceService:
         except Exception as e:
             print(f"Error fetching earnings date for {ticker}: {e}")
             return None
-
-    @ttl_cache(ttl=86400) # 24 Hours (Sectors rarely change)
-    def get_stock_sector(self, ticker: str) -> Dict[str, str]:
-        """
-        Identify the sector of a ticker and return its name and proxy ETF.
-        Returns: {"name": "Technology", "etf": "XLK"} or None/Default
-        """
-        try:
-            stock = yf.Ticker(ticker)
-            sector_name = stock.info.get('sector', 'Unknown')
-            
-            # Map yfinance sector names to SPDR ETFs            
-            etf = SECTOR_2_ETF_MAP.get(sector_name)
-            
-            # Fallback for subsets or if exact match fails
-            if not etf:
-                return {"name": sector_name, "etf": "SPY"} # Default to Market
-                
-            return {"name": sector_name, "etf": etf}
-            
-        except Exception as e:
-            return {"name": "Unknown", "etf": "SPY"}
 
     @ttl_cache(ttl=86400) # 24h cache for the fetch itself, though DB will cache for 30 days
     def get_etf_holdings(self, etf_ticker: str) -> List[str]:
