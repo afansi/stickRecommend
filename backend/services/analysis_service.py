@@ -6,6 +6,7 @@ from services.llm_engine import LLMFactory
 from models.tables import Recommendation, NewsArticle
 from config import settings
 from services.finance_service import FinanceService
+import json
 
 class AnalysisService:
     def __init__(self, session: Session):
@@ -38,8 +39,6 @@ class AnalysisService:
         # - If force_refresh is FALSE and we have ANY active recommendation, return it.
         # - If force_refresh is TRUE, we skip this and generate a new one.
         if not force_refresh and existing_rec:
-            # We also check if it's very old (e.g., > 24h) we might consider it stale, 
-            # but per user request, we return previous results that support the recommendation.
             print(f"📦 AnalysisService: Returning existing recommendation for {ticker}")
             return existing_rec
 
@@ -147,12 +146,27 @@ class AnalysisService:
             print(f"❌ Parser: Regex Failed [{ticker}]: {e} | Raw Response: {response}")
             reason = f"Parse fallback: {response[:100]}..."
 
-        # Prepare metadata
+        # Prepare metadata and Verified Sources
         company_name = financials.get("company_name", "Unknown")
         source_news_url = news_items[0].get("url") if news_items else None
+        
+        sources = []
+        for item in news_items[:3]:
+            # Impact labeling based on sentiment
+            impact = "Neutral"
+            sent = item.get("sentiment_score", 0)
+            if sent > 0.1: impact = "Positive"
+            elif sent < -0.1: impact = "Negative"
+            
+            sources.append({
+                "title": item.get("title", "Market Update"),
+                "publisher": item.get("publisher", "Financial News"),
+                "url": item.get("link", "#"),
+                "impact": impact
+            })
 
         # 5. Save to DB
-        # Archive previous active recommendations for this ticker (Bulk Update)
+        # Archive previous active recommendations for this ticker
         statement = update(Recommendation).where(
             Recommendation.ticker == ticker, 
             Recommendation.is_active == True,
@@ -170,16 +184,17 @@ class AnalysisService:
             date_generated=datetime.utcnow(),
             is_active=True,
             user_id=user_id,
-            source_news_url=source_news_url
+            source_news_url=source_news_url,
+            verified_sources=json.dumps(sources)
         )
         self.session.add(rec)
         self.session.commit()
         self.session.refresh(rec)
         
-        # 6. Generate Alert (Immediate Context)
+        # 6. Generate Alert
         from services.alert_service import AlertService
         alert_service = AlertService(self.session)
-        alert_service.generate_alerts_from_recommendations(user=None, recommendations=[rec]) # AlertService will handle user_id from rec
+        alert_service.generate_alerts_from_recommendations(user=None, recommendations=[rec])
 
         total_duration = (datetime.utcnow() - start_time).total_seconds()
         print(f"🏁 AnalysisService: COMPLETED analysis for {ticker} in {total_duration:.2f}s")

@@ -90,6 +90,13 @@ const Dashboard = () => {
         setScanning(false);
     };
 
+    // Helper for robust date parsing (Safari compatibility)
+    const parseSafeDate = (dateStr) => {
+        if (!dateStr) return new Date();
+        const iso = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T');
+        return new Date(iso);
+    };
+
     return (
         <div className="space-y-6">
             <header className="flex justify-between items-center mb-8">
@@ -201,7 +208,7 @@ const Dashboard = () => {
                                                 <Link to={`/analysis/${rec.ticker}`} className="text-xl font-bold text-white hover:text-primary transition-colors">{rec.ticker}</Link>
                                                 <span className="text-[10px] text-gray-500">
                                                     {(() => {
-                                                        const diff = (new Date() - new Date(rec.date_generated)) / 1000;
+                                                        const diff = (new Date() - parseSafeDate(rec.date_generated)) / 1000;
                                                         if (diff < 60) return 'Just now';
                                                         if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
                                                         if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
@@ -217,7 +224,7 @@ const Dashboard = () => {
                                             </span>
                                         </div>
                                         <div className="text-right">
-                                            <div className="text-xl font-bold text-primary">{rec.confidence_score}</div>
+                                            <div className="text-xl font-bold text-primary">{rec.confidence_score || 0}</div>
                                             <span className="text-[10px] text-gray-500">Score</span>
                                         </div>
                                     </div>
@@ -290,3 +297,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+

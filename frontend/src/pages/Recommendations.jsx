@@ -20,6 +20,18 @@ const Recommendations = () => {
         fetchRecs();
     }, []);
 
+    // Helper for robust date parsing (Safari compatibility)
+    const formatDisplayDate = (dateStr) => {
+        if (!dateStr) return 'Recent';
+        try {
+            const iso = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T');
+            const d = new Date(iso);
+            return isNaN(d.getTime()) ? 'Recent' : d.toLocaleDateString();
+        } catch (e) {
+            return 'Recent';
+        }
+    };
+
     if (loading) return <div className="text-white">Loading recommendations...</div>;
 
     return (
@@ -33,7 +45,7 @@ const Recommendations = () => {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 gap-4">
-                    {recs.sort((a, b) => b.confidence_score - a.confidence_score).map((rec) => (
+                    {recs.sort((a, b) => (b.confidence_score || 0) - (a.confidence_score || 0)).map((rec) => (
                         <div key={rec.id} className="bg-surface p-6 rounded-xl border border-gray-700 hover:border-gray-600 transition-colors">
                             <div className="flex justify-between items-start mb-4">
                                 <div>
@@ -51,11 +63,11 @@ const Recommendations = () => {
                                     </div>
                                     <div className="flex items-center gap-2 mt-1 text-gray-500 text-sm">
                                         <Clock size={14} />
-                                        <span>{new Date(rec.date_generated).toLocaleDateString()}</span>
+                                        <span>{formatDisplayDate(rec.date_generated)}</span>
                                     </div>
                                 </div>
                                 <div className="text-right">
-                                    <div className="text-3xl font-bold text-primary">{rec.confidence_score}</div>
+                                    <div className="text-3xl font-bold text-primary">{rec.confidence_score || 0}</div>
                                     <span className="text-xs text-gray-500">Confidence</span>
                                 </div>
                             </div>
@@ -92,3 +104,4 @@ const Recommendations = () => {
 };
 
 export default Recommendations;
+

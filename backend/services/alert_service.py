@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from typing import List
-from sqlmodel import Session
+from sqlmodel import Session, update
 from models.tables import Alert, User, PortfolioItem, Recommendation
 from services.finance_service import FinanceService
 
@@ -78,6 +78,7 @@ class AlertService:
     def generate_alerts_from_recommendations(self, user: User, recommendations: List[Recommendation]) -> List[Alert]:
         """
         Generate alerts from high-confidence recommendations.
+        Ensures only one active alert exists per ticker.
         """
         alerts = []
         
@@ -97,6 +98,15 @@ class AlertService:
 
                 u_id = user.id if user else rec.user_id
                 
+                # Archiving old unread alerts for this ticker to prevent duplicates
+                self.session.exec(
+                    update(Alert).where(
+                        Alert.ticker == rec.ticker,
+                        Alert.user_id == u_id,
+                        Alert.is_read == False
+                    ).values(is_read=True)
+                )
+
                 alert = Alert(
                     user_id=u_id,
                     ticker=rec.ticker,
@@ -124,3 +134,4 @@ class AlertService:
         
         if old_alerts:
             self.session.commit()
+

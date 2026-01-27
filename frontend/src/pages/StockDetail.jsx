@@ -21,7 +21,7 @@ const StockDetail = () => {
             setData(analysisRes.data);
             setTechnicals(techRes.data);
         } catch (err) {
-            console.error(err);
+            console.error("Failed to fetch stock detail data", err);
         }
         setLoading(false);
         setRefreshing(false);
@@ -35,6 +35,19 @@ const StockDetail = () => {
     }, [ticker]);
 
     if (loading) return <div className="text-center p-10 text-gray-400">Analyzing Market Data for {ticker}...</div>;
+
+    // Helper to SAFELY parse dates for Mac/Safari compatibility
+    const formatDisplayDate = (dateStr) => {
+        if (!dateStr) return 'Just now';
+        try {
+            // Replace space with T to create valid ISO-8601 for Safari
+            const isoStr = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T');
+            const d = new Date(isoStr);
+            return isNaN(d.getTime()) ? 'Recent' : d.toLocaleString();
+        } catch (e) {
+            return 'Recent';
+        }
+    };
 
     return (
         <div className="max-w-4xl mx-auto space-y-6 pb-20">
@@ -129,10 +142,12 @@ const StockDetail = () => {
 
                     <div className="bg-background rounded p-6 border border-gray-700">
                         <div className="flex justify-between items-start mb-4">
-                            <div className="text-gray-400 text-sm">Confidence: {data.confidence_score}/10</div>
-                            <span className="text-xs text-gray-500">Generated: {new Date(data.date_generated).toLocaleString()}</span>
+                            <div className="text-gray-400 text-sm">Confidence: {data.confidence_score || 0}/10</div>
+                            <span className="text-xs text-gray-500">
+                                Generated: {formatDisplayDate(data.date_generated)}
+                            </span>
                         </div>
-                        <p className="text-lg text-gray-200 leading-relaxed font-medium whitespace-pre-wrap">"{data.reasoning}"</p>
+                        <p className="text-lg text-gray-200 leading-relaxed font-medium whitespace-pre-wrap">"{data.reasoning || 'Gathering market insights...'}"</p>
                     </div>
                 </div>
             )}
@@ -143,21 +158,41 @@ const StockDetail = () => {
                     <FileText size={20} /> Verified Sources
                 </h3>
                 <div className="space-y-3">
-                    <div className="flex items-start gap-3 p-3 hover:bg-background/50 rounded transition-colors cursor-pointer group">
-                        <div className="mt-1"><CheckCircle size={16} className="text-success" /></div>
-                        <div>
-                            <h4 className="text-blue-400 group-hover:underline">Quarterly Earnings Report Q4</h4>
-                            <p className="text-sm text-gray-400">Source: SEC.gov • Verified Impact: <span className="text-success">Positive</span></p>
-                        </div>
-                    </div>
-                    {/* Mock More */}
-                    <div className="flex items-start gap-3 p-3 hover:bg-background/50 rounded transition-colors cursor-pointer group">
-                        <div className="mt-1"><AlertTriangle size={16} className="text-yellow-500" /></div>
-                        <div>
-                            <h4 className="text-blue-400 group-hover:underline">Analyst Downgrade by Goldman Sachs</h4>
-                            <p className="text-sm text-gray-400">Source: Bloomberg • Verified Impact: <span className="text-yellow-500">Neutral</span></p>
-                        </div>
-                    </div>
+                    {data && data.verified_sources ? (
+                        JSON.parse(data.verified_sources).map((source, idx) => (
+                            <a
+                                key={idx}
+                                href={source.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-start gap-3 p-3 hover:bg-background/50 rounded transition-colors group"
+                            >
+                                <div className="mt-1">
+                                    {source.impact === 'Positive' ? (
+                                        <CheckCircle size={16} className="text-success" />
+                                    ) : source.impact === 'Negative' ? (
+                                        <AlertTriangle size={16} className="text-danger" />
+                                    ) : (
+                                        <AlertTriangle size={16} className="text-yellow-500" />
+                                    )}
+                                </div>
+                                <div>
+                                    <h4 className="text-blue-400 group-hover:underline font-medium">{source.title}</h4>
+                                    <p className="text-sm text-gray-400">
+                                        Source: {source.publisher} • Verified Impact:
+                                        <span className={`ml-1 font-bold ${source.impact === 'Positive' ? 'text-success' :
+                                            source.impact === 'Negative' ? 'text-danger' :
+                                                'text-yellow-500'
+                                            }`}>
+                                            {source.impact}
+                                        </span>
+                                    </p>
+                                </div>
+                            </a>
+                        ))
+                    ) : (
+                        <p className="text-gray-500 text-sm italic">No verified sources currently linked to this analysis.</p>
+                    )}
                 </div>
             </div>
         </div>

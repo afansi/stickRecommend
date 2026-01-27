@@ -57,6 +57,7 @@ class Recommendation(SQLModel, table=True):
     is_active: bool = Field(default=True, index=True)
     source_news_id: Optional[int] = Field(default=None, foreign_key="newsarticle.id")
     source_news_url: Optional[str] = None
+    verified_sources: Optional[str] = Field(default=None) # JSON-encoded list of supporting news items
     
     user_id: int = Field(foreign_key="user.id", index=True)
     user: Optional[User] = Relationship(back_populates="recommendations")
@@ -71,3 +72,4 @@ class Alert(SQLModel, table=True):
     
     user_id: int = Field(foreign_key="user.id")
     user: Optional[User] = Relationship(back_populates="alerts")
+
