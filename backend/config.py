@@ -56,5 +56,5 @@ SECTOR_2_ETF_MAP = {
 }
 
 # Scheduler Configuration
-SCAN_SCHEDULE = os.getenv("SCAN_SCHEDULE", "0 6 * * 0")  # Default: Sunday at 6 AM (cron format)
+SCAN_SCHEDULE = os.getenv("SCAN_SCHEDULE", "0 1 * * 0")  # Default: Sunday at 1 AM (cron format)
 ENABLE_SCHEDULED_SCAN = os.getenv("ENABLE_SCHEDULED_SCAN", "true").lower() == "true"

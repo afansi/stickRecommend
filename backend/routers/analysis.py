@@ -1,10 +1,11 @@
-from typing import List
-from fastapi import APIRouter, Depends
+from typing import List, Dict
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlmodel import Session, select
 from database import get_session
-from models.tables import Recommendation, User
+from models.tables import Recommendation, User, DiscoveryOpportunity
 from auth.security import get_current_user
 from services.analysis_service import AnalysisService
+from services.scanner_service import ScannerService
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
@@ -43,13 +44,12 @@ def get_recommendations(session: Session = Depends(get_session), current_user: U
     ).all()
     return recs
 
-@router.post("/scan")
-def trigger_scan(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+@router.post("/scan", response_model=Dict)
+def scan_market(force: bool = False, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
     """
     Trigger a manual scan of the User's active sectors.
     Returns the list of new recommendations generated.
     """
-    from services.scanner_service import ScannerService
     scanner = ScannerService(session)
     
     # Get active sectors
@@ -71,5 +71,43 @@ def trigger_scan(session: Session = Depends(get_session), current_user: User = D
         "status": "scan_complete", 
         "sectors_scanned": sectors,
         "new_recommendations": len(results),
-        "details": results
+        "details": [r.dict() for r in results]
     }
+
+@router.get("/discover", response_model=List[DiscoveryOpportunity])
+def get_discovery_insights(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    """
+    Discovery Engine: Fetches saved institutional weekly setups from the DB.
+    """
+    recs = session.exec(
+        select(DiscoveryOpportunity).where(DiscoveryOpportunity.user_id == current_user.id)
+    ).all()
+    return recs
+
+@router.get("/discover/status")
+def get_discovery_status():
+    """Check if a discovery scan is currently running."""
+    return ScannerService.get_status()
+
+@router.post("/discover/scan")
+def trigger_discovery_scan(
+    background_tasks: BackgroundTasks, 
+    session: Session = Depends(get_session), 
+    current_user: User = Depends(get_current_user)
+):
+    """Trigger a fresh discovery scan in the background."""
+    if ScannerService._is_scanning:
+        raise HTTPException(status_code=409, detail="A scan is already in progress.")
+
+    def run_scan():
+        # New session for background task
+        from database import SessionLocal
+        bg_session = SessionLocal()
+        try:
+            scanner = ScannerService(bg_session)
+            scanner.discover_opportunities(current_user.id)
+        finally:
+            bg_session.close()
+
+    background_tasks.add_task(run_scan)
+    return {"message": "Discovery scan started in background."}

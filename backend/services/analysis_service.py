@@ -1,6 +1,7 @@
 import concurrent.futures
 from sqlmodel import Session, select, update
 from datetime import datetime
+from typing import List, Optional
 from services.news_service import NewsService
 from services.llm_engine import LLMFactory
 from models.tables import Recommendation, NewsArticle
@@ -20,7 +21,7 @@ class AnalysisService:
             model=settings.LLM_MODEL
         )
 
-    def analyze_ticker(self, ticker: str, user_id: int, force_refresh: bool = False) -> Recommendation:
+    def analyze_ticker(self, ticker: str, user_id: int, force_refresh: bool = False, is_vcp: bool = False, is_blue_sky: bool = False, has_super_trend: bool = False, rs_rating: Optional[float] = None) -> Recommendation:
         """
         Hybrid Analysis Pipeline (Optimized):
         Concurrent fetching of News, Financials, Technicals, and Sector data.
@@ -185,7 +186,11 @@ class AnalysisService:
             is_active=True,
             user_id=user_id,
             source_news_url=source_news_url,
-            verified_sources=json.dumps(sources)
+            verified_sources=json.dumps(sources),
+            is_vcp=is_vcp,
+            is_blue_sky=is_blue_sky,
+            has_super_trend=has_super_trend,
+            rs_rating=rs_rating
         )
         self.session.add(rec)
         self.session.commit()

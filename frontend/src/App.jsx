@@ -5,6 +5,7 @@ import Portfolio from './pages/Portfolio';
 import StockDetail from './pages/StockDetail';
 import Settings from './pages/Settings';
 import Recommendations from './pages/Recommendations';
+import TradingHub from './pages/TradingHub';
 import Sidebar from './components/Sidebar';
 
 // Layout for protected routes
@@ -37,6 +38,7 @@ function App() {
                     <Route path="/portfolio" element={<Portfolio />} />
                     <Route path="/analysis/:ticker" element={<StockDetail />} />
                     <Route path="/recommendations" element={<Recommendations />} />
+                    <Route path="/cockpit" element={<TradingHub />} />
                     <Route path="/settings" element={<Settings />} />
                 </Route>
             </Routes>

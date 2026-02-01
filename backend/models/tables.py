@@ -13,6 +13,8 @@ class User(SQLModel, table=True):
     portfolio_items: List["PortfolioItem"] = Relationship(back_populates="user")
     alerts: List["Alert"] = Relationship(back_populates="user")
     recommendations: List["Recommendation"] = Relationship(back_populates="user")
+    trade_plans: List["TradePlan"] = Relationship(back_populates="user")
+    journal_entries: List["JournalEntry"] = Relationship(back_populates="user")
 
 # --- Core Data ---
 class Sector(SQLModel, table=True):
@@ -61,7 +63,13 @@ class Recommendation(SQLModel, table=True):
     
     user_id: int = Field(foreign_key="user.id", index=True)
     user: Optional[User] = Relationship(back_populates="recommendations")
-
+    
+    # --- Institutional Setup Flags ---
+    is_vcp: bool = Field(default=False)
+    is_blue_sky: bool = Field(default=False)
+    has_super_trend: bool = Field(default=False)
+    rs_rating: Optional[float] = Field(default=None)
+    
 class Alert(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     ticker: str = Field(index=True)
@@ -73,3 +81,60 @@ class Alert(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id")
     user: Optional[User] = Relationship(back_populates="alerts")
 
+# --- Phase 4: Behavioral Psychology ---
+
+class TradePlan(SQLModel, table=True):
+    """
+    Trade plans finalized during the weekend.
+    Decision locking prevents mid-week editing without override.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticker: str = Field(index=True)
+    entry_price: float
+    stop_loss: float
+    target_price: float
+    expected_duration_weeks: int = Field(default=4)
+    setup_type: str # e.g., "VCP", "Blue Sky", "Relative Strength"
+    conviction_score: int # 1-10
+    
+    # Decisions are considered "Locked" if made on Saturday/Sunday
+    is_locked: bool = Field(default=True) 
+    date_planned: datetime = Field(default_factory=datetime.utcnow)
+    
+    user_id: int = Field(foreign_key="user.id", index=True)
+    user: Optional[User] = Relationship(back_populates="trade_plans")
+
+class JournalEntry(SQLModel, table=True):
+    """
+    Execution journal for tracking emotional state and anti-bias metrics.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticker: str = Field(index=True)
+    action: str # "ENTRY", "EXIT", "ADJUSTMENT"
+    price: float
+    
+    # Psychological Metadata
+    emotional_state: str # e.g., "Calm", "Anxious", "Greedy", "Fearful"
+    bias_check: str # AI generated or user note on why they are making the move
+    
+    date_logged: datetime = Field(default_factory=datetime.utcnow)
+    
+    user_id: int = Field(foreign_key="user.id", index=True)
+    user: Optional[User] = Relationship(back_populates="journal_entries")
+
+class DiscoveryOpportunity(SQLModel, table=True):
+    """
+    Weekly Trader Discovery Insights (Wipe \u0026 Replace).
+    Only stores the highest-conviction setups from the weekly scan.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticker: str = Field(index=True)
+    action: str
+    reasoning: str
+    is_vcp: bool = Field(default=False)
+    is_blue_sky: bool = Field(default=False)
+    has_super_trend: bool = Field(default=False)
+    rs_rating: Optional[float] = Field(default=None)
+    date_generated: datetime = Field(default_factory=datetime.utcnow)
+    
+    user_id: int = Field(foreign_key="user.id", index=True)

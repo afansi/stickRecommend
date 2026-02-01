@@ -32,18 +32,22 @@ def scan_all_users():
             logger.info(f"Scanning sectors {sectors} for user {user.username}")
             
             scanner = ScannerService(session)
+            
+            # 1. Broad Discovery Scan (Institutional Setups)
+            logger.info(f"Running discovery scan for {user.username}...")
+            scanner.discover_opportunities(user.id)
+
+            # 2. Sector-specific Scans
             results = scanner.scan_active_sectors(sectors, user.id)
             total_recommendations += len(results)
             
-            # Generate alerts from new recommendations
+            # 3. Alerts
             from services.alert_service import AlertService
             alert_service = AlertService(session)
             alert_service.generate_alerts_from_recommendations(user, results)
-            
-            # Also check portfolio for alerts
             alert_service.generate_alerts_for_portfolio(user)
             
-        logger.info(f"Scheduled scan complete. Generated {total_recommendations} new recommendations across {len(users)} users.")
+        logger.info(f"Scheduled scan complete.")
         
     except Exception as e:
         logger.error(f"Error in scheduled scan: {e}")

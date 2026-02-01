@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, PieChart, Newspaper, Settings, LogOut, List } from 'lucide-react';
+import { LayoutDashboard, Compass, PieChart, Newspaper, Settings, LogOut, List } from 'lucide-react';
 
 const Sidebar = () => {
     const navigate = useNavigate();
@@ -12,6 +12,7 @@ const Sidebar = () => {
 
     const navItems = [
         { path: '/', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
+        { path: '/cockpit', label: 'Trading Cockpit', icon: <Compass size={20} /> },
         { path: '/portfolio', label: 'Portfolio', icon: <PieChart size={20} /> },
         { path: '/recommendations', label: 'Recommendations', icon: <List size={20} /> },
         { path: '/settings', label: 'Settings', icon: <Settings size={20} /> },

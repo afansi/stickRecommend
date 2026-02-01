@@ -107,6 +107,7 @@ class FinanceService:
         except Exception as e:
             print(f"Error fetching technicals for {ticker}: {e}")
             return {}
+
     @ttl_cache(ttl=3600)
     def get_market_performance(self, ticker: str = "SPY") -> float:
         """
@@ -288,3 +289,107 @@ class FinanceService:
             print(f"Batch Technicals failed: {e}")
             # Fallback to individual fetches (slower but safer)
             return {t: self.get_technicals(t) for t in tickers}
+
+    @ttl_cache(ttl=43200) # 12 Hour Cache
+    def get_weekly_technicals(self, ticker: str) -> Dict:
+        """
+        Calculate Weekly Technicals (W1):
+        - 30-week MA (MM30W) - Stan Weinstein Stage indicator
+        - 10-week MA (MM10W) - Short-term momentum
+        - Weekly RSI(14)
+        - Bollinger Band Width (Volatility Compression)
+        """
+        try:
+            yahoo_rate_limiter.wait_if_needed()
+            stock = yf.Ticker(ticker)
+            # Fetch 2 years to ensure enough history for 30-week MA
+            hist = stock.history(period="2y", interval="1wk")
+            if hist.empty or len(hist) < 30:
+                return {}
+
+            close = hist['Close']
+            
+            # 1. Weekly Moving Averages
+            ma10w = close.rolling(window=10).mean().iloc[-1]
+            ma30w = close.rolling(window=30).mean().iloc[-1]
+            prev_ma30w = close.rolling(window=30).mean().iloc[-2]
+            
+            # 2. Weekly RSI
+            delta = close.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            
+            # 3. Bollinger Band Width
+            bb_middle = close.rolling(window=20).mean()
+            bb_std = close.rolling(window=20).std()
+            bb_upper = bb_middle + (bb_std * 2)
+            bb_lower = bb_middle - (bb_std * 2)
+            bb_width = (bb_upper - bb_lower) / bb_middle
+            
+            # 4. Volatility Compression Check (is width at 52-week low?)
+            bbw_52w_low = bb_width.rolling(window=52).min().iloc[-1]
+            is_compressed = bb_width.iloc[-1] <= (bbw_52w_low * 1.1) # Within 10% of 52w low
+
+            # 5. 52-Week High (for Blue Sky setups)
+            high_52w = hist['High'].rolling(window=52).max().iloc[-1]
+
+            return {
+                "ma_10w": float(round(ma10w, 2)),
+                "ma_30w": float(round(ma30w, 2)),
+                "ma_30w_slope": "UP" if ma30w > prev_ma30w else "DOWN",
+                "rsi_w1": float(round(rsi.iloc[-1], 2)),
+                "bb_width": float(round(bb_width.iloc[-1], 4)),
+                "is_vcp": bool(is_compressed),
+                "current_price": float(round(close.iloc[-1], 2)),
+                "high_52w": float(round(high_52w, 2))
+            }
+        except Exception as e:
+            print(f"Error fetching weekly technicals for {ticker}: {e}")
+            return {}
+
+    @ttl_cache(ttl=86400)
+    def get_relative_strength(self, ticker: str, benchmark: str = "SPY") -> Dict:
+        """
+        Calculate Relative Strength Rating:
+        Performance of stock vs benchmark over the last 6 months.
+        """
+        try:
+            yahoo_rate_limiter.wait_if_needed()
+            stock = yf.Ticker(ticker)
+            spy = yf.Ticker(benchmark)
+            
+            # 6-month performance
+            hist_stock = stock.history(period="6mo")
+            hist_spy = spy.history(period="6mo")
+            
+            if hist_stock.empty or hist_spy.empty:
+                return {"rs_score": 0, "alpha_flag": False}
+
+            stock_ret = (hist_stock['Close'].iloc[-1] - hist_stock['Close'].iloc[0]) / hist_stock['Close'].iloc[0]
+            spy_ret = (hist_spy['Close'].iloc[-1] - hist_spy['Close'].iloc[0]) / hist_spy['Close'].iloc[0]
+            
+            # Alpha Flag: Stock up while market down in last week?
+            last_week_stock = (hist_stock['Close'].iloc[-1] - hist_stock['Close'].iloc[-5]) / hist_stock['Close'].iloc[-5]
+            last_week_spy = (hist_spy['Close'].iloc[-1] - hist_spy['Close'].iloc[-5]) / hist_spy['Close'].iloc[-5]
+            
+            # Compare vs Benchmark
+            alpha_flag = last_week_stock > 0 and last_week_spy < 0
+
+            # Calculate a simplified "Rating" (0-100) based on ratio
+            # A ratio of 1.0 means it matched the market. 
+            # We'll map a 2.0 ratio (2x market) to ~90 score.
+            rs_score = 50 + (stock_ret / spy_ret * 20) if spy_ret > 0 else 50
+            rs_score = min(max(rs_score, 1), 99) # Clip between 1-99
+
+            return {
+                "ticker_ret_6mo": float(round(stock_ret * 100, 2)),
+                "spy_ret_6mo": float(round(spy_ret * 100, 2)),
+                "rs_ratio": float(round(stock_ret / spy_ret, 2)) if spy_ret != 0 else 0.0,
+                "rs_score": float(round(rs_score, 0)),
+                "alpha_flag": bool(alpha_flag)
+            }
+        except Exception as e:
+            print(f"Error calculating RS for {ticker}: {e}")
+            return {"rs_score": 0, "alpha_flag": False}
