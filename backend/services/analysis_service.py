@@ -21,7 +21,7 @@ class AnalysisService:
             model=settings.LLM_MODEL
         )
 
-    def analyze_ticker(self, ticker: str, user_id: int, force_refresh: bool = False, is_vcp: bool = False, is_blue_sky: bool = False, has_super_trend: bool = False, rs_rating: Optional[float] = None) -> Recommendation:
+    def analyze_ticker(self, ticker: str, user_id: int, force_refresh: bool = False, is_vcp: bool = False, is_blue_sky: bool = False, has_super_trend: bool = False, rs_rating: Optional[float] = None, is_decoupled: bool = False) -> Recommendation:
         """
         Hybrid Analysis Pipeline (Optimized):
         Concurrent fetching of News, Financials, Technicals, and Sector data.
@@ -171,11 +171,11 @@ class AnalysisService:
         ma50 = technicals.get("ma_50", 0)
         
         # Default Stop at MA50 or 8% risk
-        hint_stop = ma50 if (ma50 > 0 and ma50 < price) else round(price * 0.92, 2)
+        hint_stop = float(ma50 if (ma50 > 0 and ma50 < price) else round(price * 0.92, 2))
         if hint_stop < price * 0.85:
-            hint_stop = round(price * 0.90, 2)
+            hint_stop = float(round(price * 0.90, 2))
         
-        hint_target = round(price + ((price - hint_stop) * 3), 2)
+        hint_target = float(round(price + ((price - hint_stop) * 3), 2))
         
         # 6. Save to DB
         # Archive previous active recommendations for this ticker
@@ -193,7 +193,7 @@ class AnalysisService:
             action=action,
             confidence_score=score,
             reasoning=reason,
-            suggested_entry=price,
+            suggested_entry=float(price),
             suggested_stop=hint_stop,
             suggested_target=hint_target,
             date_generated=datetime.utcnow(),
@@ -204,7 +204,8 @@ class AnalysisService:
             is_vcp=is_vcp,
             is_blue_sky=is_blue_sky,
             has_super_trend=has_super_trend,
-            rs_rating=rs_rating
+            rs_rating=float(rs_rating) if rs_rating is not None else None,
+            is_decoupled=is_decoupled
         )
         self.session.add(rec)
         self.session.commit()

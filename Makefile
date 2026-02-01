@@ -13,7 +13,7 @@ help:
 
 up:
 	docker-compose up --build -d
-	@echo "Backend API running at http://localhost:8000"
+	@echo "Backend API running at http://localhost:8050"
 
 down:
 	docker-compose down

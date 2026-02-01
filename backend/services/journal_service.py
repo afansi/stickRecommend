@@ -42,10 +42,10 @@ class JournalService:
             target_price=target,
             setup_type=setup,
             conviction_score=conviction,
-            num_shares=risk_results.get("num_shares", 0),
-            risk_amount=risk_results.get("risk_amount", 0.0),
-            position_size_pct=risk_results.get("position_size_pct", 0.0),
-            prob_success=prob_success,
+            num_shares=int(risk_results.get("num_shares", 0)),
+            risk_amount=float(risk_results.get("risk_amount", 0.0)),
+            position_size_pct=float(risk_results.get("position_size_pct", 0.0)),
+            prob_success=float(prob_success) if prob_success is not None else None,
             is_locked=is_weekend,
             date_planned=today
         )

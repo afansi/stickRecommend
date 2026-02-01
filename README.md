@@ -70,7 +70,7 @@ Visit **http://localhost:3000** in your browser.
 
 ## 👤 First Time Login
 Since the database starts empty, you need to create an initial user.
-1. Go to the API Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+1. Go to the API Docs: [http://localhost:8050/docs](http://localhost:8050/docs)
 2. Use the **POST /auth/register** endpoint.
    ```json
    {
@@ -110,4 +110,48 @@ TradePlan
  record, locks it (if it's the weekend), and the R-Manager immediately calculates the shares for you.
 [!NOTE] In the current UI, the discovery items and trade plans are displayed separately. We can add a "Create Plan from Discovery" button to make this link even smoother!
 
+## Inte-Market Correlation
 
+When the r-coefficient (correlation) stays above 0.70 (or below -0.70), it means the market has entered a "Macro-Driven Regime." In these periods, your individual stock analysis (VCP, RSI, Earnings) becomes secondary to the "Big Waves."
+
+Here are the concrete actions you should take based on the institutional playbook:
+
+1. The "Tide" Check (Position Sizing)
+Action: Reduce your Risk per Trade in the R-Manager.
+Logic: When correlations are high $(\pm 0.70)$, individual stock setups are likely to fail if the index moves against them. Cut your risk from 1.0% to 0.5% until correlations drop below 0.50. This protects you from "systemic flushes."
+
+2. DXY (US Dollar) Correlation
+If $r < -0.70$ (Strong Inverse):
+Action: Watch the Dollar Index (DXY) as your primary "Stop Light."
+Strategy: If the DXY is rising, do not buy breakouts, even if they look perfect. Wait for the DXY to hit a daily ceiling (resistance) before committing to a VCP setup.
+
+3. TNX (10Y Yield) Correlation
+If $r > 0.70$ (Strong Positive) or $r < -0.70$:
+Action: Rotate your sector exposure.
+Strategy: High rate-sensitivity means High-PE Growth (Tech/AI) will be volatile. If yields are rising and correlation is high, shift your "Alpha Scan" toward Financials (XLF) or Energy (XLE), which often benefit from higher rates.
+
+4. VIX (Volatility) Correlation
+If $r < -0.80$ (Standard Inverse):
+Action: Use the VIX as a "Contrarian Entry-Trigger."
+Strategy: When the VIX spikes into the 20-25 range and correlations are locked, look for your Alpha Setups to be "Oversold." This is often the best time to enter a Relative Strength (RS) leader that is holding up better than the SPY.
+
+5. Stop Being a "Hero"
+Action: Do not buy "Sore Thumbs" (stocks moving opposite to the market).
+Logic: In high-correlation regimes, "divergence" is often a trap. If the market is dumping and your stock is holding green, it will likely "catch up" to the downside eventually once the correlation snaps back.
+
+
+Pro Tip: Look for the "Correlation Divergence." When a stock's correlation to the SPY drops while its Relative Strength increases, you have found a true institutional leader that is being accumulated regardless of the macro noise. That is where the real money is made. 
+
+## Weekend Performance Review
+
+The Institutional Weekend Performance Review is now fully operational! 🛡️📊✨
+
+How to use it: In your Trading Hub, scroll down to the bottom. You will now see a new section: "Weekend Performance Post-Mortem."
+
+Generate Review: Click the "GENERATE NEW REVIEW" button. The system will immediately:
+Fetch the latest closing prices for every stock in your active Trade Plans.
+Compare the weekly close to your Entry and Targets.
+Calculate your Total Portfolio Exposure and Cumulative Risk % (the "Sleep Well" factor).
+AI Verdict: An AI Risk Manager will analyze the weekly price action and generate a structured 3-part report covering Position Performance, Risk Management, and Learning/Archiving.
+Risk Gauges: You'll see high-level metrics for your total dollar exposure and cumulative risk percentage, flagged as "Acceptable" or "Caution" depending on your portfolio density.
+This completes the institutional loop: from Alpha Discovery to R-Manager Execution and finally Post-Mortem Review. 🚀📉📡

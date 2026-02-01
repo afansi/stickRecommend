@@ -88,21 +88,21 @@ class FinanceService:
             bb_lower = bb_middle - (bb_std * 2)
             
             return {
-                "current_price": round(current_price, 2),
-                "rsi_14": round(current_rsi, 2) if not pd.isna(current_rsi) else None,
-                "ma_50": round(ma50, 2) if not pd.isna(ma50) else None,
-                "ma_200": round(ma200, 2) if not pd.isna(ma200) else None,
+                "current_price": float(round(current_price, 2)),
+                "rsi_14": float(round(current_rsi, 2)) if not pd.isna(current_rsi) else None,
+                "ma_50": float(round(ma50, 2)) if not pd.isna(ma50) else None,
+                "ma_200": float(round(ma200, 2)) if not pd.isna(ma200) else None,
                 "macd": {
-                    "line": round(macd_line.iloc[-1], 3),
-                    "signal": round(signal_line.iloc[-1], 3),
-                    "histogram": round(macd_line.iloc[-1] - signal_line.iloc[-1], 3)
+                    "line": float(round(macd_line.iloc[-1], 3)),
+                    "signal": float(round(signal_line.iloc[-1], 3)),
+                    "histogram": float(round(macd_line.iloc[-1] - signal_line.iloc[-1], 3))
                 },
                 "bollinger": {
-                    "upper": round(bb_upper.iloc[-1], 2),
-                    "middle": round(bb_middle.iloc[-1], 2),
-                    "lower": round(bb_lower.iloc[-1], 2)
+                    "upper": float(round(bb_upper.iloc[-1], 2)),
+                    "middle": float(round(bb_middle.iloc[-1], 2)),
+                    "lower": float(round(bb_lower.iloc[-1], 2))
                 },
-                "trend": "BULLISH" if current_price > ma50 and current_price > ma200 else "BEARISH" if current_price < ma50 else "NEUTRAL"
+                "trend": "BULLISH" if (ma50 and ma200 and current_price > ma50 and current_price > ma200) else "BEARISH" if (ma50 and current_price < ma50) else "NEUTRAL"
             }
         except Exception as e:
             print(f"Error fetching technicals for {ticker}: {e}")
@@ -277,10 +277,10 @@ class FinanceService:
                     current_price = close_prices.iloc[-1]
                     
                     results[ticker] = {
-                        "rsi_14": round(current_rsi, 2) if not pd.isna(current_rsi) else None,
-                        "ma_50": round(ma50, 2) if not pd.isna(ma50) else None,
+                        "rsi_14": float(round(current_rsi, 2)) if not pd.isna(current_rsi) else None,
+                        "ma_50": float(round(ma50, 2)) if not pd.isna(ma50) else None,
                         "trend": "UP" if current_price > ma50 else "DOWN",
-                        "current_price": round(current_price, 2)
+                        "current_price": float(round(current_price, 2))
                     }
                 except Exception:
                     continue
@@ -383,12 +383,28 @@ class FinanceService:
             rs_score = 50 + (stock_ret / spy_ret * 20) if spy_ret > 0 else 50
             rs_score = min(max(rs_score, 1), 99) # Clip between 1-99
 
+            # Institutional "Decoupling" Check: 1-month correlation vs SPY
+            # Low correlation (<0.4) + High RS (>80) = Institutional Accumulation
+            is_decoupled = False
+            try:
+                # 1 Month correlation
+                s_1m = hist_stock['Close'].iloc[-21:] # ~21 trading days
+                m_1m = hist_spy['Close'].iloc[-21:]
+                if len(s_1m) == len(m_1m) and len(s_1m) > 10:
+                    corr = s_1m.corr(m_1m)
+                    if corr < 0.4 and rs_score > 80:
+                        is_decoupled = True
+                        print(f"💎 Institutional Alpha: {ticker} DECOUPLED from SPY (Corr: {corr:.2f}, RS: {rs_score})")
+            except Exception:
+                pass
+
             return {
                 "ticker_ret_6mo": float(round(stock_ret * 100, 2)),
                 "spy_ret_6mo": float(round(spy_ret * 100, 2)),
                 "rs_ratio": float(round(stock_ret / spy_ret, 2)) if spy_ret != 0 else 0.0,
                 "rs_score": float(round(rs_score, 0)),
-                "alpha_flag": bool(alpha_flag)
+                "alpha_flag": bool(alpha_flag),
+                "is_decoupled": is_decoupled
             }
         except Exception as e:
             print(f"Error calculating RS for {ticker}: {e}")

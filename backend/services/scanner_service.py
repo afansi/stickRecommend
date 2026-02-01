@@ -143,7 +143,8 @@ class ScannerService:
                             is_vcp=filters["vcp"],
                             is_blue_sky=filters["blue_sky"],
                             has_super_trend=filters["super_trend"],
-                            rs_rating=rs_data.get("rs_score")
+                            rs_rating=rs_data.get("rs_score"),
+                            is_decoupled=rs_data.get("is_decoupled", False)
                         )
                         
                         # 3. Calculate "Hints" (Suggested Levels)
@@ -152,14 +153,14 @@ class ScannerService:
                         ma30w = weekly_techs.get("ma_30w", 0)
                         
                         # Stop Loss: Use 10-week MA (institutional floor) if valid, else 8% fixed risk
-                        suggested_stop = ma10w if (ma10w > 0 and ma10w < price) else round(price * 0.92, 2)
+                        suggested_stop = float(ma10w if (ma10w > 0 and ma10w < price) else round(price * 0.92, 2))
                         # Ensure stop isn't TOO far (max 15%)
                         if suggested_stop < price * 0.85:
-                            suggested_stop = round(price * 0.90, 2)
+                            suggested_stop = float(round(price * 0.90, 2))
                             
                         risk = price - suggested_stop
                         # Target: 3:1 Reward-to-Risk ratio
-                        suggested_target = round(price + (risk * 3), 2)
+                        suggested_target = float(round(price + (risk * 3), 2))
 
                         # Convert to DiscoveryOpportunity (Global)
                         opp = DiscoveryOpportunity(
@@ -167,13 +168,14 @@ class ScannerService:
                             sector=ticker_to_sector.get(ticker, "Unknown"),
                             action=rec.action,
                             reasoning=rec.reasoning,
-                            suggested_entry=price,
-                            suggested_stop=suggested_stop,
-                            suggested_target=suggested_target,
+                            suggested_entry=float(price),
+                            suggested_stop=float(suggested_stop),
+                            suggested_target=float(suggested_target),
                             is_vcp=filters["vcp"],
                             is_blue_sky=filters["blue_sky"],
                             has_super_trend=filters["super_trend"],
-                            rs_rating=rs_data.get("rs_score")
+                            rs_rating=float(rs_data.get("rs_score", 0)),
+                            is_decoupled=rs_data.get("is_decoupled", False)
                         )
                         return opp
                 except Exception as e:

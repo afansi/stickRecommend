@@ -17,6 +17,7 @@ class User(SQLModel, table=True):
     recommendations: List["Recommendation"] = Relationship(back_populates="user")
     trade_plans: List["TradePlan"] = Relationship(back_populates="user")
     journal_entries: List["JournalEntry"] = Relationship(back_populates="user")
+    performance_reviews: List["PerformanceReview"] = Relationship(back_populates="user")
 
 # --- Core Data ---
 class Sector(SQLModel, table=True):
@@ -77,6 +78,7 @@ class Recommendation(SQLModel, table=True):
     is_blue_sky: bool = Field(default=False)
     has_super_trend: bool = Field(default=False)
     rs_rating: Optional[float] = Field(default=None)
+    is_decoupled: bool = Field(default=False)
     
 class Alert(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -156,4 +158,27 @@ class DiscoveryOpportunity(SQLModel, table=True):
     is_blue_sky: bool = Field(default=False)
     has_super_trend: bool = Field(default=False)
     rs_rating: Optional[float] = Field(default=None)
+    is_decoupled: bool = Field(default=False)
     date_generated: datetime = Field(default_factory=datetime.utcnow)
+
+class PerformanceReview(SQLModel, table=True):
+    """
+    Weekend Review Report generated after market close.
+    Contains Active Position analysis, Risk assessment, and Post-Mortem.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    date_generated: datetime = Field(default_factory=datetime.utcnow)
+    
+    # 1. Performance Summary (JSON of tickers/P&L/Analysis)
+    positions_data: str = Field(default="{}") 
+    
+    # 2. Risk Management (Aggregated metrics)
+    total_exposure: float = Field(default=0.0)
+    cumulative_risk_pct: float = Field(default=0.0)
+    risk_verdict: str = Field(default="Acceptable")
+    
+    # 3. Learning & Notes
+    global_market_analysis: str = Field(default="")
+    
+    user_id: int = Field(foreign_key="user.id", index=True)
+    user: Optional[User] = Relationship(back_populates="performance_reviews")
