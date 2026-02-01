@@ -70,7 +70,9 @@ class ReportingService:
         
         Provide a concise 3-part report:
         1. PERFORMANCE OF ACTIVE POSITIONS (Technical analysis of weekly candles/closes).
-        2. WEEKEND RISK MANAGEMENT (Should we hedge? Is exposure acceptable?).
+           - For EACH position, provide a "Tool Action" (e.g., "EXIT", "HOLD", "ADJUST STOP", "PSYCHOLOGICAL LOCK").
+           - Explain the rationale clearly (e.g., "Closed below Support", "Support held, maintain patience").
+        2. WEEKEND RISK MANAGEMENT (Should we hedge? Is total exposure acceptable?).
         3. ARCHIVING & LEARNING (One lesson or adjustment for next week).
         
         Format as clear Markdown with headers.

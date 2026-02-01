@@ -102,7 +102,7 @@ class FinanceService:
                     "middle": float(round(bb_middle.iloc[-1], 2)),
                     "lower": float(round(bb_lower.iloc[-1], 2))
                 },
-                "trend": "BULLISH" if (ma50 and ma200 and current_price > ma50 and current_price > ma200) else "BEARISH" if (ma50 and current_price < ma50) else "NEUTRAL"
+                "trend": "UP" if (ma50 and ma200 and current_price > ma50 and current_price > ma200) else "DOWN" if (ma50 and current_price < ma50) else "NEUTRAL"
             }
         except Exception as e:
             print(f"Error fetching technicals for {ticker}: {e}")
