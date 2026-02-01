@@ -5,6 +5,7 @@ from typing import List, Dict
 from sqlmodel import Session, select, delete
 from services.finance_service import FinanceService
 from services.analysis_service import AnalysisService
+from services.universe_service import UniverseService
 from models.tables import Sector, DiscoveryOpportunity
 from config import SECTOR_2_ETF_MAP
 
@@ -16,6 +17,7 @@ class ScannerService:
         self.session = session
         self.finance_service = FinanceService()
         self.analysis_service = AnalysisService(session)
+        self.universe_service = UniverseService()
 
     @classmethod
     def get_status(cls):
@@ -105,23 +107,19 @@ class ScannerService:
             
             # 1. Global Wipe (Fresh weekly start)
             print("🔭 Discovery: Performing Global Wipe of previous findings...")
-            self.session.exec(delete(DiscoveryOpportunity))
+            self.session.execute(delete(DiscoveryOpportunity))
             self.session.commit()
 
-            # Mapping of Ticker -> Sector for later storage
-            ticker_to_sector = {}
-            all_tickers = []
-            for sector, etf in SECTOR_2_ETF_MAP.items():
-                holdings = self.finance_service.get_etf_holdings(etf)
-                for t in holdings:
-                    ticker_to_sector[t] = sector
-                all_tickers.extend(holdings)
-            
-            # Deduplicate
-            unique_tickers = list(set(all_tickers))
+            # 2. Get Global Investable Universe
+            unique_tickers = self.universe_service.get_investable_universe()
             print(f"🔭 Discovery: Scanning {len(unique_tickers)} unique symbols globally...")
 
             opportunities = []
+            
+            # Helper to map ticker to sector if not already known
+            # 3. Batch Fetch Sectors
+            print(f"🔭 Discovery: Enriching {len(unique_tickers)} tickers with sector data...")
+            ticker_to_sector = self.universe_service.get_sector_map(unique_tickers)
             
             def process_ticker(ticker):
                 try:
@@ -163,9 +161,13 @@ class ScannerService:
                         suggested_target = float(round(price + (risk * 3), 2))
 
                         # Convert to DiscoveryOpportunity (Global)
+                        # Convert to DiscoveryOpportunity (Global)
+                        # Fetch sector from pre-filled map
+                        sector = ticker_to_sector.get(ticker, "Unknown")
+
                         opp = DiscoveryOpportunity(
                             ticker=ticker,
-                            sector=ticker_to_sector.get(ticker, "Unknown"),
+                            sector=sector,
                             action=rec.action,
                             reasoning=rec.reasoning,
                             suggested_entry=float(price),

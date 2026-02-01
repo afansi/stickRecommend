@@ -114,13 +114,14 @@ def trigger_discovery_scan(
 
     def run_scan():
         # New session for background task
-        from database import SessionLocal
-        bg_session = SessionLocal()
-        try:
-            scanner = ScannerService(bg_session)
-            scanner.discover_opportunities()
-        finally:
-            bg_session.close()
+        from database import engine
+        from sqlmodel import Session
+        with Session(engine) as bg_session:
+            try:
+                scanner = ScannerService(bg_session)
+                scanner.discover_opportunities()
+            finally:
+                bg_session.close()
 
     background_tasks.add_task(run_scan)
     return {"message": "Global discovery scan started in background."}
