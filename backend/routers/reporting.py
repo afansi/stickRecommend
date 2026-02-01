@@ -22,9 +22,8 @@ def generate_review(current_user: User = Depends(get_current_user), session: Ses
 def get_latest(current_user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     """
     Fetch the most recent weekend review.
+    Returns None if no review exists.
     """
     service = ReportingService(session)
     review = service.get_latest_review(current_user.id)
-    if not review:
-        raise HTTPException(status_code=404, detail="No performance reviews found.")
     return review

@@ -1,12 +1,21 @@
 import yfinance as yf
 import pandas as pd
 from typing import Dict, Optional, List
-from config import SECTOR_2_ETF_MAP
+from config import SECTOR_2_ETF_MAP, COUNTRY_BENCHMARKS
 
 from utils.cache import ttl_cache
 from utils.rate_limiter import yahoo_rate_limiter
 
 class FinanceService:
+    def _get_benchmark_for_ticker(self, ticker: str) -> str:
+        """
+        Detects the appropriate market benchmark based on ticker suffix.
+        """
+        for suffix, benchmark in COUNTRY_BENCHMARKS.items():
+            if suffix != "default" and ticker.endswith(suffix):
+                return benchmark
+        return COUNTRY_BENCHMARKS["default"]
+
     @ttl_cache(ttl=86400) # 24 Hours (Sectors rarely change)
     def get_stock_metadata(self, ticker: str) -> Dict:
         """
@@ -98,11 +107,11 @@ class FinanceService:
                     "histogram": float(round(macd_line.iloc[-1] - signal_line.iloc[-1], 3))
                 },
                 "bollinger": {
-                    "upper": float(round(bb_upper.iloc[-1], 2)),
-                    "middle": float(round(bb_middle.iloc[-1], 2)),
-                    "lower": float(round(bb_lower.iloc[-1], 2))
+                    "upper": float(round(bb_upper.iloc[-1], 2)) if not pd.isna(bb_upper.iloc[-1]) else 0.0,
+                    "middle": float(round(bb_middle.iloc[-1], 2)) if not pd.isna(bb_middle.iloc[-1]) else 0.0,
+                    "lower": float(round(bb_lower.iloc[-1], 2)) if not pd.isna(bb_lower.iloc[-1]) else 0.0
                 },
-                "trend": "UP" if (ma50 and ma200 and current_price > ma50 and current_price > ma200) else "DOWN" if (ma50 and current_price < ma50) else "NEUTRAL"
+                "trend": "UP" if (ma50 and ma200 and not pd.isna(ma50) and not pd.isna(ma200) and current_price > ma50 and current_price > ma200) else "DOWN" if (ma50 and not pd.isna(ma50) and current_price < ma50) else "NEUTRAL"
             }
         except Exception as e:
             print(f"Error fetching technicals for {ticker}: {e}")
@@ -126,11 +135,14 @@ class FinanceService:
             return 0.0
 
     @ttl_cache(ttl=3600)
-    def get_sector_performance(self, sector_etf: str) -> Dict:
-        """Calculate sector momentum vs S&P 500 (SPY)."""
+    def get_sector_performance(self, sector_etf: str, ticker: Optional[str] = None) -> Dict:
+        """Calculate sector momentum vs appropriate benchmark (Regional or SPY)."""
         try:
-            # If sector is Market (SPY), return Neutral
-            if sector_etf == "SPY":
+            # Use provided ticker to find local benchmark, fallback to SPY
+            benchmark = self._get_benchmark_for_ticker(ticker) if ticker else "SPY"
+            
+            # If sector IS the benchmark, return Neutral
+            if sector_etf == benchmark:
                  return {
                     "sector_return_1mo": 0.0,
                     "market_return_1mo": 0.0,
@@ -146,21 +158,21 @@ class FinanceService:
             if sector_hist.empty:
                 return {}
 
-            # Use Cached Market Performance
-            spy_return = self.get_market_performance("SPY")
+            # Use Dynamic Market Performance
+            market_return = self.get_market_performance(benchmark)
             sector_return = (sector_hist['Close'].iloc[-1] - sector_hist['Close'].iloc[0]) / sector_hist['Close'].iloc[0]
             
             # Helper logic for Strength
-            if sector_return > spy_return:
+            if sector_return > market_return:
                 strength = "LEADER"
-            elif sector_return < spy_return:
+            elif sector_return < market_return:
                 strength = "LAGGARD"
             else:
                 strength = "NEUTRAL"
 
             return {
                 "sector_return_1mo": round(sector_return * 100, 2),
-                "market_return_1mo": round(spy_return * 100, 2),
+                "market_return_1mo": round(market_return * 100, 2),
                 "relative_strength": strength
             }
         except Exception as e:
@@ -291,6 +303,76 @@ class FinanceService:
             return {t: self.get_technicals(t) for t in tickers}
 
     @ttl_cache(ttl=43200) # 12 Hour Cache
+    def batch_get_weekly_technicals(self, tickers: List[str]) -> Dict[str, Dict]:
+        """
+        Calculates weekly technicals in bulk using yf.download.
+        Processes in chunks of 50 to maintain performance and avoid API errors.
+        """
+        if not tickers:
+            return {}
+
+        all_results = {}
+        chunk_size = 50
+        
+        for i in range(0, len(tickers), chunk_size):
+            chunk = tickers[i:i + chunk_size]
+            try:
+                # Fetch 2 years of data for 30w MA and 52w High
+                data = yf.download(chunk, period="2y", interval="1wk", group_by="ticker", threads=True, progress=False)
+                
+                for ticker in chunk:
+                    try:
+                        t_data = data[ticker] if len(chunk) > 1 else data
+                        # Drop NaNs for stability
+                        t_data = t_data.dropna(subset=['Close'])
+                        
+                        if len(t_data) < 30:
+                            continue
+                            
+                        close = t_data['Close']
+                        high = t_data['High']
+                        
+                        # Indicators
+                        ma10w = close.rolling(window=10).mean().iloc[-1]
+                        ma30w = close.rolling(window=30).mean().iloc[-1]
+                        prev_ma30w = close.rolling(window=30).mean().iloc[-2]
+                        
+                        # RSI
+                        delta = close.diff()
+                        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                        rs = gain / loss
+                        rsi = (100 - (100 / (1 + rs))).iloc[-1]
+                        
+                        # VCP (BB Width)
+                        bb_middle = close.rolling(window=20).mean()
+                        bb_std = close.rolling(window=20).std()
+                        bb_upper = bb_middle + (bb_std * 2)
+                        bb_lower = bb_middle - (bb_std * 2)
+                        bb_width = (bb_upper - bb_lower) / bb_middle
+                        
+                        bbw_52w_low = bb_width.rolling(window=52).min().iloc[-1]
+                        is_compressed = bb_width.iloc[-1] <= (bbw_52w_low * 1.1)
+                        
+                        high_52w = high.rolling(window=52).max().iloc[-1]
+                        
+                        all_results[ticker] = {
+                            "ma_10w": float(round(ma10w, 2)) if not pd.isna(ma10w) else 0.0,
+                            "ma_30w": float(round(ma30w, 2)) if not pd.isna(ma30w) else 0.0,
+                            "ma_30w_slope": "UP" if (not pd.isna(ma30w) and not pd.isna(prev_ma30w) and ma30w > prev_ma30w) else "DOWN",
+                            "rsi_w1": float(round(rsi, 2)) if not pd.isna(rsi) else 50.0,
+                            "is_vcp": bool(is_compressed) if not pd.isna(is_compressed) else False,
+                            "current_price": float(round(close.iloc[-1], 2)),
+                            "high_52w": float(round(high_52w, 2)) if not pd.isna(high_52w) else 0.0
+                        }
+                    except Exception:
+                        continue
+            except Exception as e:
+                print(f"Batch weekly fetch failed for chunk: {e}")
+                
+        return all_results
+
+    @ttl_cache(ttl=43200) # 12 Hour Cache
     def get_weekly_technicals(self, ticker: str) -> Dict:
         """
         Calculate Weekly Technicals (W1):
@@ -336,36 +418,37 @@ class FinanceService:
             high_52w = hist['High'].rolling(window=52).max().iloc[-1]
 
             return {
-                "ma_10w": float(round(ma10w, 2)),
-                "ma_30w": float(round(ma30w, 2)),
-                "ma_30w_slope": "UP" if ma30w > prev_ma30w else "DOWN",
-                "rsi_w1": float(round(rsi.iloc[-1], 2)),
-                "bb_width": float(round(bb_width.iloc[-1], 4)),
-                "is_vcp": bool(is_compressed),
-                "current_price": float(round(close.iloc[-1], 2)),
-                "high_52w": float(round(high_52w, 2))
+                "ma_10w": float(round(ma10w, 2)) if not pd.isna(ma10w) else 0.0,
+                "ma_30w": float(round(ma30w, 2)) if not pd.isna(ma30w) else 0.0,
+                "ma_30w_slope": "UP" if (not pd.isna(ma30w) and not pd.isna(prev_ma30w) and ma30w > prev_ma30w) else "DOWN",
+                "rsi_w1": float(round(rsi.iloc[-1], 2)) if not pd.isna(rsi.iloc[-1]) else 50.0,
+                "bb_width": float(round(bb_width.iloc[-1], 4)) if not pd.isna(bb_width.iloc[-1]) else 0.0,
+                "is_vcp": bool(is_compressed) if not pd.isna(is_compressed) else False,
+                "current_price": float(round(close.iloc[-1], 2)) if not pd.isna(close.iloc[-1]) else 0.0,
+                "high_52w": float(round(high_52w, 2)) if not pd.isna(high_52w) else 0.0
             }
         except Exception as e:
             print(f"Error fetching weekly technicals for {ticker}: {e}")
             return {}
 
     @ttl_cache(ttl=86400)
-    def get_relative_strength(self, ticker: str, benchmark: str = "SPY") -> Dict:
+    def get_relative_strength(self, ticker: str) -> Dict:
         """
         Calculate Relative Strength Rating:
-        Performance of stock vs benchmark over the last 6 months.
+        Performance of stock vs appropriate benchmark (Regional or SPY).
         """
+        benchmark = self._get_benchmark_for_ticker(ticker)
         try:
             yahoo_rate_limiter.wait_if_needed()
             stock = yf.Ticker(ticker)
             spy = yf.Ticker(benchmark)
             
-            # 6-month performance
-            hist_stock = stock.history(period="6mo")
-            hist_spy = spy.history(period="6mo")
+            # 6-month performance - Drop NaNs to avoid calculation errors
+            hist_stock = stock.history(period="6mo").dropna(subset=['Close'])
+            hist_spy = spy.history(period="6mo").dropna(subset=['Close'])
             
-            if hist_stock.empty or hist_spy.empty:
-                return {"rs_score": 0, "alpha_flag": False}
+            if hist_stock.empty or hist_spy.empty or len(hist_stock) < 5 or len(hist_spy) < 5:
+                return {"rs_score": 0, "alpha_flag": False, "benchmark": benchmark}
 
             stock_ret = (hist_stock['Close'].iloc[-1] - hist_stock['Close'].iloc[0]) / hist_stock['Close'].iloc[0]
             spy_ret = (hist_spy['Close'].iloc[-1] - hist_spy['Close'].iloc[0]) / hist_spy['Close'].iloc[0]
@@ -380,7 +463,11 @@ class FinanceService:
             # Calculate a simplified "Rating" (0-100) based on ratio
             # A ratio of 1.0 means it matched the market. 
             # We'll map a 2.0 ratio (2x market) to ~90 score.
-            rs_score = 50 + (stock_ret / spy_ret * 20) if spy_ret > 0 else 50
+            if pd.isna(stock_ret) or pd.isna(spy_ret) or spy_ret == 0:
+                rs_score = 50
+            else:
+                rs_score = 50 + (stock_ret / spy_ret * 20)
+                
             rs_score = min(max(rs_score, 1), 99) # Clip between 1-99
 
             # Institutional "Decoupling" Check: 1-month correlation vs SPY
@@ -392,19 +479,20 @@ class FinanceService:
                 m_1m = hist_spy['Close'].iloc[-21:]
                 if len(s_1m) == len(m_1m) and len(s_1m) > 10:
                     corr = s_1m.corr(m_1m)
-                    if corr < 0.4 and rs_score > 80:
+                    if not pd.isna(corr) and corr < 0.4 and rs_score > 80:
                         is_decoupled = True
                         print(f"💎 Institutional Alpha: {ticker} DECOUPLED from SPY (Corr: {corr:.2f}, RS: {rs_score})")
             except Exception:
                 pass
 
             return {
-                "ticker_ret_6mo": float(round(stock_ret * 100, 2)),
-                "spy_ret_6mo": float(round(spy_ret * 100, 2)),
-                "rs_ratio": float(round(stock_ret / spy_ret, 2)) if spy_ret != 0 else 0.0,
-                "rs_score": float(round(rs_score, 0)),
+                "ticker_ret_6mo": float(round(stock_ret * 100, 2)) if not pd.isna(stock_ret) else 0.0,
+                "spy_ret_6mo": float(round(spy_ret * 100, 2)) if not pd.isna(spy_ret) else 0.0,
+                "rs_ratio": float(round(stock_ret / spy_ret, 2)) if (not pd.isna(stock_ret) and not pd.isna(spy_ret) and spy_ret != 0) else 0.0,
+                "rs_score": float(round(rs_score, 0)) if not pd.isna(rs_score) else 50.0,
                 "alpha_flag": bool(alpha_flag),
-                "is_decoupled": is_decoupled
+                "is_decoupled": is_decoupled,
+                "benchmark": benchmark
             }
         except Exception as e:
             print(f"Error calculating RS for {ticker}: {e}")

@@ -55,6 +55,14 @@ SECTOR_2_ETF_MAP = {
     "Oil & Gas Exploration": "XOP",
 }
 
+COUNTRY_BENCHMARKS = {
+    "default": "SPY",
+    ".DE": "^GDAXI",  # Germany (DAX)
+    ".PA": "^FCHI",   # France (CAC 40)
+    ".L": "^FTSE",    # UK (FTSE 100)
+    ".TO": "^GSPTSE", # Canada (TSX)
+}
+
 # Scheduler Configuration
 SCAN_SCHEDULE = os.getenv("SCAN_SCHEDULE", "0 1 * * 0")  # Default: Sunday at 1 AM (cron format)
 ENABLE_SCHEDULED_SCAN = os.getenv("ENABLE_SCHEDULED_SCAN", "true").lower() == "true"

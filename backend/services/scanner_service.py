@@ -112,81 +112,83 @@ class ScannerService:
 
             # 2. Get Global Investable Universe
             unique_tickers = self.universe_service.get_investable_universe()
-            print(f"🔭 Discovery: Scanning {len(unique_tickers)} unique symbols globally...")
+            print(f"🔭 Discovery: Screening {len(unique_tickers)} unique symbols globally...")
+
+            # 3. Batch Weekly Technical Screening (The Speedup)
+            # This fetches indicators in bulk and avoids hundreds of individual requests
+            print(f"🔭 Discovery: Batch calculating indicators for screening...")
+            batch_weekly_data = self.finance_service.batch_get_weekly_technicals(unique_tickers)
+            
+            # Prune the universe to only those passing the initial technical setup
+            candidates = []
+            for ticker in unique_tickers:
+                techs = batch_weekly_data.get(ticker)
+                if techs:
+                    filters = self._passes_institutional_filters_from_data(techs)
+                    if filters["vcp"] or filters["blue_sky"]:
+                        candidates.append((ticker, techs, filters))
+            
+            print(f"🔭 Discovery: {len(candidates)} candidates passed technical screening. Starting deep analysis...")
 
             opportunities = []
             
-            # Helper to map ticker to sector if not already known
-            # 3. Batch Fetch Sectors
-            print(f"🔭 Discovery: Enriching {len(unique_tickers)} tickers with sector data...")
-            ticker_to_sector = self.universe_service.get_sector_map(unique_tickers)
+            # Helper to map ticker to sector
+            ticker_to_sector = self.universe_service.get_sector_map([c[0] for c in candidates])
             
-            def process_ticker(ticker):
+            def process_candidate(candidate_info):
+                ticker, weekly_techs, filters = candidate_info
                 try:
-                    # 1. Fetch Weekly Technicals once for both filtering and hinting
-                    weekly_techs = self.finance_service.get_weekly_technicals(ticker)
-                    if not weekly_techs:
-                        return None
+                    # 1. Fetch RS data
+                    rs_data = self.finance_service.get_relative_strength(ticker)
 
-                    # 2. Apply Filters
-                    filters = self._passes_institutional_filters_from_data(weekly_techs)
-                    if filters["vcp"] or filters["blue_sky"]:
-                        # Fetch RS data
-                        rs_data = self.finance_service.get_relative_strength(ticker)
-
-                        # Use System User (ID 1) for the analysis context
-                        rec = self.analysis_service.analyze_ticker(
-                            ticker, 
-                            user_id=1, 
-                            is_vcp=filters["vcp"],
-                            is_blue_sky=filters["blue_sky"],
-                            has_super_trend=filters["super_trend"],
-                            rs_rating=rs_data.get("rs_score"),
-                            is_decoupled=rs_data.get("is_decoupled", False)
-                        )
+                    # 2. Trigger Full Analysis (AI reasoning/News/Financials)
+                    # We use System User (ID 1)
+                    rec = self.analysis_service.analyze_ticker(
+                        ticker, 
+                        user_id=1, 
+                        is_vcp=filters["vcp"],
+                        is_blue_sky=filters["blue_sky"],
+                        has_super_trend=filters["super_trend"],
+                        rs_rating=rs_data.get("rs_score"),
+                        is_decoupled=rs_data.get("is_decoupled", False)
+                    )
+                    
+                    # 3. Calculate "Hints" (Suggested Levels)
+                    price = weekly_techs.get("current_price", 0)
+                    ma10w = weekly_techs.get("ma_10w", 0)
+                    
+                    suggested_stop = float(ma10w if (ma10w > 0 and ma10w < price) else round(price * 0.92, 2))
+                    if suggested_stop < price * 0.85:
+                        suggested_stop = float(round(price * 0.90, 2))
                         
-                        # 3. Calculate "Hints" (Suggested Levels)
-                        price = weekly_techs.get("current_price", 0)
-                        ma10w = weekly_techs.get("ma_10w", 0)
-                        ma30w = weekly_techs.get("ma_30w", 0)
-                        
-                        # Stop Loss: Use 10-week MA (institutional floor) if valid, else 8% fixed risk
-                        suggested_stop = float(ma10w if (ma10w > 0 and ma10w < price) else round(price * 0.92, 2))
-                        # Ensure stop isn't TOO far (max 15%)
-                        if suggested_stop < price * 0.85:
-                            suggested_stop = float(round(price * 0.90, 2))
-                            
-                        risk = price - suggested_stop
-                        # Target: 3:1 Reward-to-Risk ratio
-                        suggested_target = float(round(price + (risk * 3), 2))
+                    risk = price - suggested_stop
+                    suggested_target = float(round(price + (risk * 3), 2))
 
-                        # Convert to DiscoveryOpportunity (Global)
-                        # Convert to DiscoveryOpportunity (Global)
-                        # Fetch sector from pre-filled map
-                        sector = ticker_to_sector.get(ticker, "Unknown")
+                    sector = ticker_to_sector.get(ticker, "Unknown")
 
-                        opp = DiscoveryOpportunity(
-                            ticker=ticker,
-                            sector=sector,
-                            action=rec.action,
-                            reasoning=rec.reasoning,
-                            suggested_entry=float(price),
-                            suggested_stop=float(suggested_stop),
-                            suggested_target=float(suggested_target),
-                            is_vcp=filters["vcp"],
-                            is_blue_sky=filters["blue_sky"],
-                            has_super_trend=filters["super_trend"],
-                            rs_rating=float(rs_data.get("rs_score", 0)),
-                            is_decoupled=rs_data.get("is_decoupled", False)
-                        )
-                        return opp
+                    opp = DiscoveryOpportunity(
+                        ticker=ticker,
+                        sector=sector,
+                        action=rec.action,
+                        reasoning=rec.reasoning,
+                        suggested_entry=float(price),
+                        suggested_stop=float(suggested_stop),
+                        suggested_target=float(suggested_target),
+                        is_vcp=filters["vcp"],
+                        is_blue_sky=filters["blue_sky"],
+                        has_super_trend=filters["super_trend"],
+                        rs_rating=float(rs_data.get("rs_score", 0)),
+                        is_decoupled=rs_data.get("is_decoupled", False)
+                    )
+                    return opp
                 except Exception as e:
                     print(f"Error processing {ticker} during discovery: {e}")
                 return None
 
-            # Execute in parallel
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                future_to_ticker = {executor.submit(process_ticker, t): t for t in unique_tickers}
+            # Execute deep analysis in parallel (I/O and LLM bound)
+            # Increased workers since many tickers were pruned by screening
+            with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+                future_to_ticker = {executor.submit(process_candidate, c): c[0] for c in candidates}
                 for future in concurrent.futures.as_completed(future_to_ticker):
                     result = future.result()
                     if result:

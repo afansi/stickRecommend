@@ -17,10 +17,9 @@ def ttl_cache(maxsize: int = 100, ttl: int = 300):
         
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Create a simplified key key from args/kwargs
-            # Note: This simple key generation might not handle unhashable types perfectly
-            # but usually fine for simple string args (tickers).
-            key = (args, tuple(sorted(kwargs.items())))
+            # Convert lists in args to tuples to make them hashable
+            hashable_args = tuple(tuple(arg) if isinstance(arg, list) else arg for arg in args)
+            key = (hashable_args, tuple(sorted(kwargs.items())))
             
             if key in cache:
                 return cache[key]

@@ -65,7 +65,7 @@ class AnalysisService:
         sector_name = sector_info.get("name", "Unknown")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            sector_perf_future = executor.submit(self.finance_service.get_sector_performance, sector_etf)
+            sector_perf_future = executor.submit(self.finance_service.get_sector_performance, sector_etf, ticker)
             sector_news_future = executor.submit(self.news_service.fetch_news, sector_etf)
 
             sector_perf = sector_perf_future.result()
