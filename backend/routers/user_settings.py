@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from database import get_session
@@ -12,20 +12,37 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 class SettingsUpdate(BaseModel):
     active_sectors: List[str]
+    total_equity: Optional[float] = None
+    risk_pct: Optional[float] = None
 
 @router.get("/settings")
 def get_settings(current_user: User = Depends(get_current_user)):
     # Convert CSV string back to list
     sectors = current_user.active_sectors.split(",") if current_user.active_sectors else []
-    return {"active_sectors": sectors}
+    return {
+        "active_sectors": sectors,
+        "total_equity": current_user.total_equity,
+        "risk_pct": current_user.risk_pct
+    }
 
 @router.put("/settings")
 def update_settings(settings: SettingsUpdate, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
     # Join list to CSV string
     current_user.active_sectors = ",".join(settings.active_sectors)
+    
+    if settings.total_equity is not None:
+        current_user.total_equity = settings.total_equity
+    if settings.risk_pct is not None:
+        current_user.risk_pct = settings.risk_pct
+        
     session.add(current_user)
     session.commit()
-    return {"status": "updated", "active_sectors": settings.active_sectors}
+    return {
+        "status": "updated", 
+        "active_sectors": settings.active_sectors,
+        "total_equity": current_user.total_equity,
+        "risk_pct": current_user.risk_pct
+    }
 
 @router.get("/news")
 def get_personalized_news(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):

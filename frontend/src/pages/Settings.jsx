@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
-import { Server, Layers, CheckCircle2 } from 'lucide-react';
+import { Server, Layers, CheckCircle2, Shield } from 'lucide-react';
 
 const Settings = () => {
     const [activeSectors, setActiveSectors] = useState([]);
+    const [equity, setEquity] = useState(50000);
+    const [riskPct, setRiskPct] = useState(1.0);
     const [loading, setLoading] = useState(true);
     const [saveStatus, setSaveStatus] = useState('');
 
@@ -12,6 +14,8 @@ const Settings = () => {
             try {
                 const res = await api.get('/users/settings');
                 setActiveSectors(res.data.active_sectors || []);
+                setEquity(res.data.total_equity || 50000);
+                setRiskPct(res.data.risk_pct || 1.0);
             } catch (err) {
                 console.error("Failed to load settings", err);
             }
@@ -19,6 +23,22 @@ const Settings = () => {
         };
         fetchSettings();
     }, []);
+
+    const handleRiskSave = async (newEquity, newRisk) => {
+        setSaveStatus('Saving...');
+        try {
+            await api.put('/users/settings', {
+                active_sectors: activeSectors,
+                total_equity: newEquity,
+                risk_pct: newRisk
+            });
+            setSaveStatus('Saved!');
+            setTimeout(() => setSaveStatus(''), 2000);
+        } catch (err) {
+            console.error("Failed to save settings", err);
+            setSaveStatus('Error saving');
+        }
+    };
 
     const toggleSector = async (sector) => {
         const newSectors = activeSectors.includes(sector)
@@ -29,7 +49,11 @@ const Settings = () => {
         setSaveStatus('Saving...');
 
         try {
-            await api.put('/users/settings', { active_sectors: newSectors });
+            await api.put('/users/settings', {
+                active_sectors: newSectors,
+                total_equity: equity,
+                risk_pct: riskPct
+            });
             setSaveStatus('Saved!');
             setTimeout(() => setSaveStatus(''), 2000);
         } catch (err) {
@@ -59,6 +83,44 @@ const Settings = () => {
                         {saveStatus}
                     </div>
                 )}
+            </div>
+
+            {/* R-Manager Settings */}
+            <div className="bg-surface rounded-xl border border-gray-700 p-6 border-t-4 border-t-danger">
+                <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                    <Shield size={20} className="text-danger" /> Institutional Risk Management
+                </h3>
+                <div className="grid grid-cols-2 gap-6">
+                    <div>
+                        <label className="text-xs uppercase font-bold text-gray-500 block mb-2">Total Equity ($)</label>
+                        <input
+                            type="number"
+                            className="w-full bg-background border border-gray-700 rounded-lg p-3 text-white focus:border-danger outline-none transition-all"
+                            value={equity}
+                            onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                setEquity(val || 0);
+                                handleRiskSave(val || 0, riskPct);
+                            }}
+                        />
+                    </div>
+                    <div>
+                        <label className="text-xs uppercase font-bold text-gray-500 block mb-2">Risk per Trade (%)</label>
+                        <input
+                            type="number" step="0.1"
+                            className="w-full bg-background border border-gray-700 rounded-lg p-3 text-white focus:border-danger outline-none transition-all"
+                            value={riskPct}
+                            onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                setRiskPct(val || 0);
+                                handleRiskSave(equity, val || 0);
+                            }}
+                        />
+                    </div>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-4 uppercase tracking-widest">
+                    These values drive the automated position sizing (R-Manager) in your trading cockpit.
+                </p>
             </div>
 
             {/* AI Model Preference */}
@@ -106,8 +168,8 @@ const Settings = () => {
                             <label
                                 key={sector}
                                 className={`flex items-center justify-between p-3 rounded-lg border transition-all cursor-pointer ${isChecked
-                                        ? 'border-accent bg-accent/10'
-                                        : 'border-gray-700 hover:border-gray-500 hover:bg-white/5'
+                                    ? 'border-accent bg-accent/10'
+                                    : 'border-gray-700 hover:border-gray-500 hover:bg-white/5'
                                     }`}
                             >
                                 <span className={isChecked ? 'text-white' : 'text-gray-400'}>{sector}</span>

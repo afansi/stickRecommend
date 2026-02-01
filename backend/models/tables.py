@@ -9,6 +9,8 @@ class User(SQLModel, table=True):
     hashed_password: str
     is_active: bool = Field(default=True)
     active_sectors: str = Field(default="Technology,Financials,Healthcare") # Comma-separated preferences
+    total_equity: float = Field(default=50000.0) # For R-Manager calculations
+    risk_pct: float = Field(default=1.0) # Default risk per trade (e.g., 1.0%)
     
     portfolio_items: List["PortfolioItem"] = Relationship(back_populates="user")
     alerts: List["Alert"] = Relationship(back_populates="user")
@@ -55,6 +57,12 @@ class Recommendation(SQLModel, table=True):
     action: str # "BUY", "SELL", "HOLD"
     confidence_score: float # 0-10
     reasoning: str
+    
+    # Suggested Price Levels ("Hints")
+    suggested_entry: Optional[float] = Field(default=None)
+    suggested_stop: Optional[float] = Field(default=None)
+    suggested_target: Optional[float] = Field(default=None)
+    
     date_generated: datetime = Field(default_factory=datetime.utcnow)
     is_active: bool = Field(default=True, index=True)
     source_news_id: Optional[int] = Field(default=None, foreign_key="newsarticle.id")
@@ -97,6 +105,12 @@ class TradePlan(SQLModel, table=True):
     setup_type: str # e.g., "VCP", "Blue Sky", "Relative Strength"
     conviction_score: int # 1-10
     
+    # R-Manager Results (calculated at time of planning)
+    num_shares: Optional[int] = Field(default=None)
+    risk_amount: Optional[float] = Field(default=None)
+    position_size_pct: Optional[float] = Field(default=None)
+    prob_success: Optional[float] = Field(default=None) # From Monte Carlo
+    
     # Decisions are considered "Locked" if made on Saturday/Sunday
     is_locked: bool = Field(default=True) 
     date_planned: datetime = Field(default_factory=datetime.utcnow)
@@ -124,17 +138,22 @@ class JournalEntry(SQLModel, table=True):
 
 class DiscoveryOpportunity(SQLModel, table=True):
     """
-    Weekly Trader Discovery Insights (Wipe \u0026 Replace).
-    Only stores the highest-conviction setups from the weekly scan.
+    Weekly Trader Discovery Insights (Global Wipe \u0026 Replace).
+    Stores the highest-conviction setups from the weekly scan across all sectors.
+    Shared by all users and filtered on display by user preferences.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
     ticker: str = Field(index=True)
+    sector: str = Field(index=True)
     action: str
     reasoning: str
+    
+    # Suggested Price Levels ("Hints")
+    suggested_entry: Optional[float] = Field(default=None)
+    suggested_stop: Optional[float] = Field(default=None)
+    suggested_target: Optional[float] = Field(default=None)
     is_vcp: bool = Field(default=False)
     is_blue_sky: bool = Field(default=False)
     has_super_trend: bool = Field(default=False)
     rs_rating: Optional[float] = Field(default=None)
     date_generated: datetime = Field(default_factory=datetime.utcnow)
-    
-    user_id: int = Field(foreign_key="user.id", index=True)

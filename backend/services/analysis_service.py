@@ -166,7 +166,18 @@ class AnalysisService:
                 "impact": impact
             })
 
-        # 5. Save to DB
+        # 5. Technical Hints (Position Sizing Guidance)
+        price = technicals.get("current_price", 0)
+        ma50 = technicals.get("ma_50", 0)
+        
+        # Default Stop at MA50 or 8% risk
+        hint_stop = ma50 if (ma50 > 0 and ma50 < price) else round(price * 0.92, 2)
+        if hint_stop < price * 0.85:
+            hint_stop = round(price * 0.90, 2)
+        
+        hint_target = round(price + ((price - hint_stop) * 3), 2)
+        
+        # 6. Save to DB
         # Archive previous active recommendations for this ticker
         statement = update(Recommendation).where(
             Recommendation.ticker == ticker, 
@@ -182,6 +193,9 @@ class AnalysisService:
             action=action,
             confidence_score=score,
             reasoning=reason,
+            suggested_entry=price,
+            suggested_stop=hint_stop,
+            suggested_target=hint_target,
             date_generated=datetime.utcnow(),
             is_active=True,
             user_id=user_id,

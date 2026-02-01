@@ -97,3 +97,17 @@ Since the database starts empty, you need to create an initial user.
 ├── docker-compose.yml  # Container Orchestration
 └── Makefile            # Shortcut Commands
 ```
+
+## Trading view
+
+1. Who creates the Trade Plan?
+Currently, it is a collaborative flow:
+
+The Market Scan (Discovery Engine): This runs automatically (or via manual trigger). It "discovers" high-conviction setups and places them in the Alpha Discovery Grid. These are Suggestions, not yet plans.
+The User: You review the discovery grid. If you see a setup you like (e.g., "NVDA VCP breakout"), you would (ideally) click a button to "Commit to Plan." This is where you finalize the Entry (the buy price), Stop (the sell price), and Target (the target price).
+The Conclusion: Once you finalize it, the system creates the 
+TradePlan
+ record, locks it (if it's the weekend), and the R-Manager immediately calculates the shares for you.
+[!NOTE] In the current UI, the discovery items and trade plans are displayed separately. We can add a "Create Plan from Discovery" button to make this link even smoother!
+
+

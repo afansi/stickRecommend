@@ -78,11 +78,24 @@ def scan_market(force: bool = False, session: Session = Depends(get_session), cu
 def get_discovery_insights(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
     """
     Discovery Engine: Fetches saved institutional weekly setups from the DB.
+    Filtered by the user's active sectors.
     """
-    recs = session.exec(
-        select(DiscoveryOpportunity).where(DiscoveryOpportunity.user_id == current_user.id)
-    ).all()
-    return recs
+    # 1. Fetch all global discovery opportunities
+    all_opps = session.exec(select(DiscoveryOpportunity)).all()
+    
+    # 2. Filter by User Sectors
+    if not current_user.active_sectors:
+        return all_opps # If no sectors chosen, show all (fallback)
+
+    user_sectors = [s.strip().lower() for s in current_user.active_sectors.split(",")]
+    
+    # Match sector name or keywords (Simplified match for now)
+    filtered = [
+        opp for opp in all_opps 
+        if opp.sector.lower() in user_sectors
+    ]
+    
+    return filtered
 
 @router.get("/discover/status")
 def get_discovery_status():
@@ -95,9 +108,9 @@ def trigger_discovery_scan(
     session: Session = Depends(get_session), 
     current_user: User = Depends(get_current_user)
 ):
-    """Trigger a fresh discovery scan in the background."""
+    """Trigger a fresh global discovery scan in the background."""
     if ScannerService._is_scanning:
-        raise HTTPException(status_code=409, detail="A scan is already in progress.")
+        raise HTTPException(status_code=409, detail="A global scan is already in progress.")
 
     def run_scan():
         # New session for background task
@@ -105,9 +118,9 @@ def trigger_discovery_scan(
         bg_session = SessionLocal()
         try:
             scanner = ScannerService(bg_session)
-            scanner.discover_opportunities(current_user.id)
+            scanner.discover_opportunities()
         finally:
             bg_session.close()
 
     background_tasks.add_task(run_scan)
-    return {"message": "Discovery scan started in background."}
+    return {"message": "Global discovery scan started in background."}

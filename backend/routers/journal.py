@@ -16,14 +16,20 @@ def create_trade_plan(
     target: float, 
     setup: str, 
     conviction: int,
+    override_equity: Optional[float] = None,
+    override_risk_pct: Optional[float] = None,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
     """
     Create a new trade plan. Automatically locks if created on a weekend.
+    Supports overriding global risk settings.
     """
     service = JournalService(session)
-    return service.create_plan(current_user.id, ticker, entry, stop, target, setup, conviction)
+    return service.create_plan(
+        current_user.id, ticker, entry, stop, target, setup, conviction, 
+        override_equity, override_risk_pct
+    )
 
 @router.post("/execute", response_model=JournalEntry)
 def log_execution(

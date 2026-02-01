@@ -20,10 +20,17 @@ def scan_all_users():
     session = SessionLocal()
     
     try:
-        # Get all active users
-        users = session.exec(select(User).where(User.is_active == True)).all()
+        scanner = ScannerService(session)
         
+        # 1. Broad Discovery Scan (Global Institutional Setups)
+        # We run this ONCE for the whole system, not per user.
+        logger.info("Running Global Discovery Scan (Shared Alpha)...")
+        scanner.discover_opportunities()
+
+        # 2. Per-User Portfolio \u0026 Sector Scans
+        users = session.exec(select(User).where(User.is_active == True)).all()
         total_recommendations = 0
+        
         for user in users:
             if not user.active_sectors:
                 continue
@@ -31,17 +38,12 @@ def scan_all_users():
             sectors = user.active_sectors.split(",")
             logger.info(f"Scanning sectors {sectors} for user {user.username}")
             
-            scanner = ScannerService(session)
-            
-            # 1. Broad Discovery Scan (Institutional Setups)
-            logger.info(f"Running discovery scan for {user.username}...")
-            scanner.discover_opportunities(user.id)
-
-            # 2. Sector-specific Scans
-            results = scanner.scan_active_sectors(sectors, user.id)
+            # Use current session for user-specific checks
+            user_scanner = ScannerService(session)
+            results = user_scanner.scan_active_sectors(sectors, user.id)
             total_recommendations += len(results)
             
-            # 3. Alerts
+            # Alerts
             from services.alert_service import AlertService
             alert_service = AlertService(session)
             alert_service.generate_alerts_from_recommendations(user, results)

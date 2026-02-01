@@ -90,63 +90,90 @@ class ScannerService:
                         print(f"Scanner: {ticker} skipped (Technical Filter).")
         return results
 
-    def discover_opportunities(self, user_id: int) -> List[DiscoveryOpportunity]:
+    def discover_opportunities(self) -> List[DiscoveryOpportunity]:
         """
-        Discovery Engine (Optimized):
-        Scans all sectors in parallel for high-conviction setups.
-        Wipes previous discovery results and replaces them with fresh ones.
+        Discovery Engine (Global):
+        Scans all sectors in parallel for institutional setups.
+        Shared across all users. Results are filtered by user sectors in the API.
         """
         if ScannerService._is_scanning:
-            print("🔭 Discovery: A scan is already in progress. Skipping.")
+            print("🔭 Discovery: A global scan is already in progress. Skipping.")
             return []
 
         try:
             ScannerService._is_scanning = True
             
-            # 1. Wipe previous results for this user
-            print(f"🔭 Discovery: Wiping previous discovery results for user {user_id}...")
-            self.session.exec(delete(DiscoveryOpportunity).where(DiscoveryOpportunity.user_id == user_id))
+            # 1. Global Wipe (Fresh weekly start)
+            print("🔭 Discovery: Performing Global Wipe of previous findings...")
+            self.session.exec(delete(DiscoveryOpportunity))
             self.session.commit()
 
+            # Mapping of Ticker -> Sector for later storage
+            ticker_to_sector = {}
             all_tickers = []
-            for etf in SECTOR_2_ETF_MAP.values():
+            for sector, etf in SECTOR_2_ETF_MAP.items():
                 holdings = self.finance_service.get_etf_holdings(etf)
+                for t in holdings:
+                    ticker_to_sector[t] = sector
                 all_tickers.extend(holdings)
             
             # Deduplicate
             unique_tickers = list(set(all_tickers))
-            print(f"🔭 Discovery: Scanning {len(unique_tickers)} unique symbols in parallel...")
+            print(f"🔭 Discovery: Scanning {len(unique_tickers)} unique symbols globally...")
 
             opportunities = []
             
             def process_ticker(ticker):
                 try:
-                    setups = self._passes_institutional_filters(ticker)
-                    if setups["vcp"] or setups["blue_sky"]:
+                    # 1. Fetch Weekly Technicals once for both filtering and hinting
+                    weekly_techs = self.finance_service.get_weekly_technicals(ticker)
+                    if not weekly_techs:
+                        return None
+
+                    # 2. Apply Filters
+                    filters = self._passes_institutional_filters_from_data(weekly_techs)
+                    if filters["vcp"] or filters["blue_sky"]:
                         # Fetch RS data
                         rs_data = self.finance_service.get_relative_strength(ticker)
 
-                        # We use the analysis service to get the reasoning, 
-                        # but we'll save it as a DiscoveryOpportunity
+                        # Use System User (ID 1) for the analysis context
                         rec = self.analysis_service.analyze_ticker(
                             ticker, 
-                            user_id,
-                            is_vcp=setups["vcp"],
-                            is_blue_sky=setups["blue_sky"],
-                            has_super_trend=setups["super_trend"],
+                            user_id=1, 
+                            is_vcp=filters["vcp"],
+                            is_blue_sky=filters["blue_sky"],
+                            has_super_trend=filters["super_trend"],
                             rs_rating=rs_data.get("rs_score")
                         )
                         
-                        # Convert to DiscoveryOpportunity for storage
+                        # 3. Calculate "Hints" (Suggested Levels)
+                        price = weekly_techs.get("current_price", 0)
+                        ma10w = weekly_techs.get("ma_10w", 0)
+                        ma30w = weekly_techs.get("ma_30w", 0)
+                        
+                        # Stop Loss: Use 10-week MA (institutional floor) if valid, else 8% fixed risk
+                        suggested_stop = ma10w if (ma10w > 0 and ma10w < price) else round(price * 0.92, 2)
+                        # Ensure stop isn't TOO far (max 15%)
+                        if suggested_stop < price * 0.85:
+                            suggested_stop = round(price * 0.90, 2)
+                            
+                        risk = price - suggested_stop
+                        # Target: 3:1 Reward-to-Risk ratio
+                        suggested_target = round(price + (risk * 3), 2)
+
+                        # Convert to DiscoveryOpportunity (Global)
                         opp = DiscoveryOpportunity(
                             ticker=ticker,
+                            sector=ticker_to_sector.get(ticker, "Unknown"),
                             action=rec.action,
                             reasoning=rec.reasoning,
-                            is_vcp=setups["vcp"],
-                            is_blue_sky=setups["blue_sky"],
-                            has_super_trend=setups["super_trend"],
-                            rs_rating=rs_data.get("rs_score"),
-                            user_id=user_id
+                            suggested_entry=price,
+                            suggested_stop=suggested_stop,
+                            suggested_target=suggested_target,
+                            is_vcp=filters["vcp"],
+                            is_blue_sky=filters["blue_sky"],
+                            has_super_trend=filters["super_trend"],
+                            rs_rating=rs_data.get("rs_score")
                         )
                         return opp
                 except Exception as e:
@@ -163,6 +190,7 @@ class ScannerService:
                         opportunities.append(result)
             
             self.session.commit()
+            print(f"✅ Discovery: Global scan complete. Found {len(opportunities)} opportunities.")
             return opportunities
             
         except Exception as e:
@@ -195,12 +223,11 @@ class ScannerService:
             
         return False
 
-    def _passes_institutional_filters(self, ticker: str) -> Dict[str, bool]:
+    def _passes_institutional_filters_from_data(self, weekly_techs: dict) -> Dict[str, bool]:
         """
         Weekly Trader Discovery Filters (Optimized):
-        Uses a single weekly history fetch for all calculations.
+        Uses pre-fetched weekly history data.
         """
-        weekly_techs = self.finance_service.get_weekly_technicals(ticker)
         if not weekly_techs:
             return {"vcp": False, "blue_sky": False, "super_trend": False}
 
@@ -220,3 +247,11 @@ class ScannerService:
             "blue_sky": blue_sky,
             "super_trend": super_trend
         }
+
+    def _passes_institutional_filters(self, ticker: str) -> Dict[str, bool]:
+        """
+        Weekly Trader Discovery Filters (Standalone):
+        Fetches data and delegates to the data-based filter.
+        """
+        weekly_techs = self.finance_service.get_weekly_technicals(ticker)
+        return self._passes_institutional_filters_from_data(weekly_techs)
