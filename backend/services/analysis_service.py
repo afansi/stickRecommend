@@ -1,7 +1,7 @@
 import concurrent.futures
 from sqlmodel import Session, select, update
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
 from services.news_service import NewsService
 from services.llm_engine import LLMFactory
 from models.tables import Recommendation, NewsArticle

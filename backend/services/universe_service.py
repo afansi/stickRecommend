@@ -35,6 +35,34 @@ class UniverseService:
         self.cache_names_expiry = timedelta(days=7)
         self.cache_liquidity_expiry = timedelta(hours=24)
         self.cache_sector_expiry = timedelta(days=7)
+        self._prepopulate_sector_cache()
+
+    def _prepopulate_sector_cache(self):
+        """Proactively fills SECTOR_CACHE using static config maps to avoid API calls."""
+        from config import SECTOR_2_ETF_MAP, REGIONAL_SECTOR_MAPS, ETF_HOLDINGS_FALLBACK_MAP
+        global SECTOR_CACHE
+        now = datetime.utcnow()
+        
+        # 1. Reverse Map US ETFs
+        # ETF -> Sector
+        etf_to_sector = {}
+        for sector, etf in SECTOR_2_ETF_MAP.items():
+            if etf not in etf_to_sector: etf_to_sector[etf] = sector
+            
+        # 2. Reverse Map Regional ETFs
+        for region, sector_map in REGIONAL_SECTOR_MAPS.items():
+            for sector, etf in sector_map.items():
+                if etf not in etf_to_sector: etf_to_sector[etf] = sector
+                
+        # 3. Fill Cache
+        for etf, tickers in ETF_HOLDINGS_FALLBACK_MAP.items():
+            sector = etf_to_sector.get(etf)
+            if sector:
+                for t in tickers:
+                    if t not in SECTOR_CACHE:
+                        SECTOR_CACHE[t] = (sector, now)
+        
+        print(f"🌍 UniverseService: Pre-populated sector cache with {len(SECTOR_CACHE)} mappings from static config.")
 
     def get_sector_map(self, tickers: List[str]) -> Dict[str, str]:
         """
@@ -63,11 +91,20 @@ class UniverseService:
         def fetch_sector(t):
             try:
                 # 'info' call can be slow, but it's the only reliable source for sector
+                
+                # Check cache again just in case another thread filled it
+                if t in SECTOR_CACHE:
+                     return t, SECTOR_CACHE[t][0]
+
+                # Use a smaller timeout for info fetches to prevent total scan hangs
                 yahoo_rate_limiter.wait_if_needed()
-                info = yf.Ticker(t).info
-                s = info.get("sector", "Unknown")
+                ticker_obj = yf.Ticker(t)
+                # Note: yfinance info is a property, but we can't easily timeout it 
+                # unless we use a wrapper. We'll rely on the rate limiter and try/except.
+                s = ticker_obj.info.get("sector", "Unknown")
                 return t, s
-            except:
+            except Exception as e:
+                print(f"⚠️ UniverseService: Error fetching sector for {t}: {e}")
                 return t, "Unknown"
 
         # Fetch in parallel with higher workers since it's IO bound
@@ -86,6 +123,16 @@ class UniverseService:
         """
         print("🌍 UniverseService: Starting Get Investable Universe...")
         all_tickers = self._get_all_raw_tickers()
+
+        from config import ETF_HOLDINGS_FALLBACK_MAP
+        etf_holdings = []
+        for v in ETF_HOLDINGS_FALLBACK_MAP.values():
+            etf_holdings.extend(v)
+
+        etf_holdings = list(set(etf_holdings))
+        all_tickers.extend(etf_holdings)
+        all_tickers = sorted(list(set(all_tickers)))
+
         print(f"🌍 UniverseService: Scraped {len(all_tickers)} raw tickers. Filtering for liquidity...")
         
         qualified = self._filter_liquidity_batch(all_tickers, min_volume, min_price, progress_callback)

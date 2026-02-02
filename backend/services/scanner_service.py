@@ -6,6 +6,7 @@ from sqlmodel import Session, select, delete
 from services.finance_service import FinanceService
 from services.analysis_service import AnalysisService
 from services.universe_service import UniverseService
+from services.news_service import NewsService
 from models.tables import Sector, DiscoveryOpportunity
 
 class ScannerService:
@@ -22,6 +23,7 @@ class ScannerService:
         self.session = session
         self.finance_service = FinanceService()
         self.analysis_service = AnalysisService(session)
+        self.news_service = NewsService()
         self.universe_service = UniverseService()
 
     @classmethod
