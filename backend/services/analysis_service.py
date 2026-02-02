@@ -58,45 +58,54 @@ class AnalysisService:
         print(f"🚀 AnalysisService: Starting fresh analysis for {ticker} (Force Refresh: {force_refresh})...")
         start_time = datetime.utcnow()
 
-        # Wave 1: Fetch Ticker-specific data in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            ticker_news_future = executor.submit(self.news_service.fetch_news, ticker)
-            financials_future = executor.submit(self.finance_service.get_financials, ticker)
-            technicals_future = executor.submit(self.finance_service.get_technicals, ticker)
-            earnings_future = executor.submit(self.finance_service.get_next_earnings_date, ticker)
-            
-            # Use pre-fetched sector info if available
-            if prefetched_sector_info:
-                sector_info = prefetched_sector_info
-                sector_info_future = None
-            else:
-                sector_info_future = executor.submit(self.finance_service.get_stock_sector, ticker)
+        # Wave 1: Ultra-fast Sector Lookup (Internal Cache)
+        # We need the sector ETF immediately to start the parallel fetch
+        if prefetched_sector_info:
+            sector_info = prefetched_sector_info
+        else:
+            # This is O(1) now as it uses SECTOR_CACHE
+            sector_info = self.finance_service.get_sector_fast(ticker)
 
-            news_items = ticker_news_future.result()
-            financials = financials_future.result()
-            technicals = technicals_future.result()
-            earnings_date = earnings_future.result()
-            if sector_info_future:
-                sector_info = sector_info_future.result()
-
-        # Wave 2: Fetch Sector-specific data in parallel
         sector_etf = sector_info.get("etf", "SPY")
         sector_name = sector_info.get("name", "Unknown")
 
-        if prefetched_sector_perf is not None and prefetched_sector_news is not None:
-            sector_perf = prefetched_sector_perf
-            sector_news = prefetched_sector_news
-        else:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        # Wave 2: Fetch EVERYTHING in parallel (Ticker + Sector data)
+        # Using 7 workers for max concurrency of Yahoo calls
+        with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
+            # Ticker Data
+            ticker_news_future = executor.submit(self.news_service.fetch_news, ticker)
+            technicals_future = executor.submit(self.finance_service.get_technicals, ticker)
+            earnings_future = executor.submit(self.finance_service.get_next_earnings_date, ticker)
+            metadata_future = executor.submit(self.finance_service.get_stock_metadata, ticker)
+            
+            # Regional/Sector Data
+            if prefetched_sector_perf is not None and prefetched_sector_news is not None:
+                sector_perf_future = None
+                sector_news_future = None
+                sector_perf = prefetched_sector_perf
+                sector_news = prefetched_sector_news
+            else:
                 sector_perf_future = executor.submit(self.finance_service.get_sector_performance, sector_etf, ticker)
                 sector_news_future = executor.submit(self.news_service.fetch_news, sector_etf)
 
+            # Collect results (Blocking until finished)
+            news_items = ticker_news_future.result()
+            technicals = technicals_future.result()
+            earnings_date = earnings_future.result()
+            metadata = metadata_future.result()
+            
+            financials = metadata.get("financials", {})
+            
+            if sector_perf_future:
                 sector_perf = sector_perf_future.result()
+            if sector_news_future:
                 sector_news = sector_news_future.result()
 
-        print(f"✅ AnalysisService: Data gathering complete in {(datetime.utcnow() - start_time).total_seconds():.2f}s")
+        gather_duration = (datetime.utcnow() - start_time).total_seconds()
+        print(f"✅ AnalysisService: Data gathering complete in {gather_duration:.2f}s")
         
         # 2. Build Context (Enhanced with Deep Technicals)
+        context_start = datetime.utcnow()
         context = f"--- STOCK DATA FOR {ticker} ---\n"
         context += f"FINANCIALS: {financials}\n"
         if earnings_date:
@@ -112,8 +121,10 @@ class AnalysisService:
         context += f"SECTOR: {sector_name} ({sector_perf})\n"
         context += f"TICKER NEWS: {[n.get('title') for n in news_items[:3]]}\n"
         context += f"SECTOR NEWS: {[n.get('title') for n in sector_news[:2]]}\n"
+        context_build_duration = (datetime.utcnow() - context_start).total_seconds()
 
         # 3. Hybrid Strategy Prompt (Professional Grade)
+        llm_start = datetime.utcnow()
         prompt = f"""
         Act as a professional financial analyst. Analyze {ticker} using a Hybrid Strategy:
         
@@ -133,6 +144,8 @@ class AnalysisService:
         
         # 4. Call LLM
         response = self.llm.analyze_text(text=context, prompt=prompt)
+        llm_duration = (datetime.utcnow() - llm_start).total_seconds()
+        print(f"🤖 AnalysisService: LLM generation complete in {llm_duration:.2f}s")
         
         # 5. Robust Parse Response (Regex)
         import re

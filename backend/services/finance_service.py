@@ -5,6 +5,7 @@ from config import SECTOR_2_ETF_MAP, COUNTRY_BENCHMARKS, ETF_HOLDINGS_FALLBACK_M
 
 from utils.cache import ttl_cache
 from utils.rate_limiter import yahoo_rate_limiter
+from services.universe_service import SECTOR_CACHE
 
 class FinanceService:
     def _get_benchmark_for_ticker(self, ticker: str) -> str:
@@ -46,11 +47,16 @@ class FinanceService:
         Fetch all metadata (financials + sector) in one go to save API calls.
         """
         try:
+            # 1. Check if we have sector in Universe Cache first (avoid info call if possible)
+            cached_sector = SECTOR_CACHE.get(ticker, (None, None))[0]
+            
             yahoo_rate_limiter.wait_if_needed()
             stock = yf.Ticker(ticker)
-            info = stock.info
             
-            sector_name = info.get('sector', 'Unknown')
+            # Note: stock.info is the main bottleneck. 
+            # If it's too slow, everything else fails.
+            info = stock.info
+            sector_name = info.get('sector') or cached_sector or 'Unknown'
             
             # Select the best regional sector ETF
             region = self._get_region_for_ticker(ticker)
@@ -85,6 +91,16 @@ class FinanceService:
     def get_stock_sector(self, ticker: str) -> Dict[str, str]:
         """Deprecated: Use get_stock_metadata"""
         return self.get_stock_metadata(ticker).get("sector", {})
+
+    def get_sector_fast(self, ticker: str) -> Dict[str, str]:
+        """
+        Ultra-fast sector lookup using SECTOR_CACHE. 
+        Avoids slow yfinance.info calls.
+        """
+        sector_name = SECTOR_CACHE.get(ticker, (None, None))[0] or "Unknown"
+        region = self._get_region_for_ticker(ticker)
+        etf = self.get_etf_for_sector(sector_name, region)
+        return {"name": sector_name, "etf": etf}
 
     @ttl_cache(ttl=14400)  # 4 Hour Cache
     def get_technicals(self, ticker: str) -> Dict:
