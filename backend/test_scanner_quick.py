@@ -27,7 +27,7 @@ def test_scanner_quick():
             print("🔭 Triggering discover_opportunities()...")
             try:
                 # Force scanning flag to False just in case
-                ScannerService._is_scanning = False
+                ScannerService.set_status(False)
                 
                 opportunities = scanner.discover_opportunities()
                 print(f"\n✅ SUCCESS: Found {len(opportunities)} opportunities.")

@@ -109,7 +109,7 @@ def trigger_discovery_scan(
     current_user: User = Depends(get_current_user)
 ):
     """Trigger a fresh global discovery scan in the background."""
-    if ScannerService._is_scanning:
+    if ScannerService.get_status()["is_scanning"]:
         raise HTTPException(status_code=409, detail="A global scan is already in progress.")
 
     def run_scan():

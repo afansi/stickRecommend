@@ -6,6 +6,7 @@ import concurrent.futures
 import time
 import os
 import io
+from utils.rate_limiter import yahoo_rate_limiter
 
 # Ticker universe cache (Long term: 7 days)
 # Ticker universe cache (Long term: 7 days)
@@ -62,6 +63,7 @@ class UniverseService:
         def fetch_sector(t):
             try:
                 # 'info' call can be slow, but it's the only reliable source for sector
+                yahoo_rate_limiter.wait_if_needed()
                 info = yf.Ticker(t).info
                 s = info.get("sector", "Unknown")
                 return t, s
@@ -78,7 +80,7 @@ class UniverseService:
                 
         return ticker_map
 
-    def get_investable_universe(self, min_volume=500000, min_price=5) -> List[str]:
+    def get_investable_universe(self, min_volume=500000, min_price=5, progress_callback=None) -> List[str]:
         """
         Main entry point: Returns the filtered global universe.
         """
@@ -86,7 +88,7 @@ class UniverseService:
         all_tickers = self._get_all_raw_tickers()
         print(f"🌍 UniverseService: Scraped {len(all_tickers)} raw tickers. Filtering for liquidity...")
         
-        qualified = self._filter_liquidity_batch(all_tickers, min_volume, min_price)
+        qualified = self._filter_liquidity_batch(all_tickers, min_volume, min_price, progress_callback)
         print(f"✅ UniverseService: {len(qualified)} tickers passed the liquidity gate.")
         return qualified
 
@@ -146,7 +148,7 @@ class UniverseService:
                 SECTOR_CACHE[k] = (v, datetime.utcnow())
         return sorted(list(all_tickers_data.keys()))
 
-    def _filter_liquidity_batch(self, tickers: List[str], min_volume: int, min_price: int) -> List[str]:
+    def _filter_liquidity_batch(self, tickers: List[str], min_volume: int, min_price: int, progress_callback=None) -> List[str]:
         """
         Efficient multi-threaded liquidity check using yfinance.
         """
@@ -173,10 +175,13 @@ class UniverseService:
         for i in range(0, len(to_check), chunk_size):
             chunk = to_check[i:i + chunk_size]
             print(f"🔍 UniverseService: Checking liquidity for chunk {i//chunk_size + 1} ({len(chunk)} tickers)...")
+            if progress_callback:
+                progress_callback(i//chunk_size + 1, (len(to_check) + chunk_size - 1) // chunk_size)
             
             try:
                 # Group fetch: period 5d is enough for average volume
-                data = yf.download(chunk, period="5d", group_by='ticker', threads=True, progress=False, interval="1d")
+                yahoo_rate_limiter.wait_if_needed()
+                data = yf.download(chunk, period="5d", group_by='ticker', threads=True, progress=False, interval="1d", timeout=60)
                 
                 for ticker in chunk:
                     try:

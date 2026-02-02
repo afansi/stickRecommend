@@ -21,7 +21,19 @@ class AnalysisService:
             model=settings.LLM_MODEL
         )
 
-    def analyze_ticker(self, ticker: str, user_id: int, force_refresh: bool = False, is_vcp: bool = False, is_blue_sky: bool = False, has_super_trend: bool = False, rs_rating: Optional[float] = None, is_decoupled: bool = False) -> Recommendation:
+    def analyze_ticker(self, 
+                       ticker: str, 
+                       user_id: int, 
+                       force_refresh: bool = False, 
+                       is_vcp: bool = False, 
+                       is_blue_sky: bool = False, 
+                       has_super_trend: bool = False, 
+                       rs_rating: Optional[float] = None, 
+                       is_decoupled: bool = False,
+                       prefetched_sector_info: Optional[Dict] = None,
+                       prefetched_sector_perf: Optional[str] = None,
+                       prefetched_sector_news: Optional[List[Dict]] = None
+                       ) -> Recommendation:
         """
         Hybrid Analysis Pipeline (Optimized):
         Concurrent fetching of News, Financials, Technicals, and Sector data.
@@ -52,24 +64,35 @@ class AnalysisService:
             financials_future = executor.submit(self.finance_service.get_financials, ticker)
             technicals_future = executor.submit(self.finance_service.get_technicals, ticker)
             earnings_future = executor.submit(self.finance_service.get_next_earnings_date, ticker)
-            sector_info_future = executor.submit(self.finance_service.get_stock_sector, ticker)
+            
+            # Use pre-fetched sector info if available
+            if prefetched_sector_info:
+                sector_info = prefetched_sector_info
+                sector_info_future = None
+            else:
+                sector_info_future = executor.submit(self.finance_service.get_stock_sector, ticker)
 
             news_items = ticker_news_future.result()
             financials = financials_future.result()
             technicals = technicals_future.result()
             earnings_date = earnings_future.result()
-            sector_info = sector_info_future.result()
+            if sector_info_future:
+                sector_info = sector_info_future.result()
 
         # Wave 2: Fetch Sector-specific data in parallel
         sector_etf = sector_info.get("etf", "SPY")
         sector_name = sector_info.get("name", "Unknown")
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            sector_perf_future = executor.submit(self.finance_service.get_sector_performance, sector_etf, ticker)
-            sector_news_future = executor.submit(self.news_service.fetch_news, sector_etf)
+        if prefetched_sector_perf is not None and prefetched_sector_news is not None:
+            sector_perf = prefetched_sector_perf
+            sector_news = prefetched_sector_news
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                sector_perf_future = executor.submit(self.finance_service.get_sector_performance, sector_etf, ticker)
+                sector_news_future = executor.submit(self.news_service.fetch_news, sector_etf)
 
-            sector_perf = sector_perf_future.result()
-            sector_news = sector_news_future.result()
+                sector_perf = sector_perf_future.result()
+                sector_news = sector_news_future.result()
 
         print(f"✅ AnalysisService: Data gathering complete in {(datetime.utcnow() - start_time).total_seconds():.2f}s")
         

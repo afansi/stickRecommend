@@ -1,9 +1,8 @@
 import yfinance as yf
 from typing import List, Dict
 
-from config import SECTOR_2_ETF_MAP
-
 from utils.cache import ttl_cache
+from utils.rate_limiter import yahoo_rate_limiter
 
 class NewsService:
     @ttl_cache(ttl=1800) # 30 Mins Cache
@@ -12,6 +11,7 @@ class NewsService:
         Fetches latest news for a ticker using yfinance.
         """
         try:
+            yahoo_rate_limiter.wait_if_needed()
             stock = yf.Ticker(ticker)
             raw_news = stock.news
             if not raw_news:
@@ -65,11 +65,15 @@ class NewsService:
                 continue
         return normalized
 
-    def fetch_sector_news(self, sector_name: str) -> List[Dict]:
+    def fetch_sector_news(self, sector_name: str, region: str = "US") -> List[Dict]:
         """
-        Fetches news for a broad sector. 
+        Fetches news for a broad sector in a specific region. 
         """
-        etf = SECTOR_2_ETF_MAP.get(sector_name)
+        # Re-initialize to avoid circular imports if any, but FinanceService is safe
+        from services.finance_service import FinanceService
+        f_service = FinanceService()
+        
+        etf = f_service.get_etf_for_sector(sector_name, region)
         if etf:
             news = self.fetch_news(etf)
             if news:

@@ -7,11 +7,16 @@ from services.finance_service import FinanceService
 from services.analysis_service import AnalysisService
 from services.universe_service import UniverseService
 from models.tables import Sector, DiscoveryOpportunity
-from config import SECTOR_2_ETF_MAP
 
 class ScannerService:
-    # Class-level flag to track scanning status across instances (resets on app restart)
-    _is_scanning = False
+    # Class-level status to track scanning progress across instances
+    _status = {
+        "is_scanning": False,
+        "phase": "idle",
+        "current": 0,
+        "total": 0,
+        "message": ""
+    }
 
     def __init__(self, session: Session):
         self.session = session
@@ -21,7 +26,17 @@ class ScannerService:
 
     @classmethod
     def get_status(cls):
-        return {"is_scanning": cls._is_scanning}
+        return cls._status
+
+    @classmethod
+    def set_status(cls, is_scanning: bool, phase: str = "idle", current: int = 0, total: int = 0, message: str = ""):
+        cls._status = {
+            "is_scanning": is_scanning,
+            "phase": phase,
+            "current": current,
+            "total": total,
+            "message": message
+        }
 
     def scan_active_sectors(self, active_sectors: List[str], user_id: int) -> List[Dict]:
         """
@@ -47,17 +62,23 @@ class ScannerService:
 
             candidates = []
             if needs_update:
-                print(f"Scanner: Updating holdings for {sector_name}...")
-                etf = SECTOR_2_ETF_MAP.get(sector_name)
-                if etf:
-                    # Fetch from Finance Service (Live or Cache)
+                print(f"Scanner: Updating global holdings for {sector_name}...")
+                # Fetch all relevant regional ETFs for this sector
+                etfs = self.finance_service.get_all_sector_etfs(sector_name)
+                all_holdings = set()
+                
+                for etf in etfs:
                     holdings_list = self.finance_service.get_etf_holdings(etf)
                     if holdings_list:
-                        sector_db.top_holdings = ",".join(holdings_list)
-                        sector_db.last_updated = datetime.utcnow()
-                        self.session.add(sector_db)
-                        self.session.commit()
-                        candidates = holdings_list
+                        all_holdings.update(holdings_list)
+                
+                if all_holdings:
+                    holdings_str = ",".join(list(all_holdings))
+                    sector_db.top_holdings = holdings_str
+                    sector_db.last_updated = datetime.utcnow()
+                    self.session.add(sector_db)
+                    self.session.commit()
+                    candidates = list(all_holdings)
             else:
                 # Use cached
                 candidates = sector_db.top_holdings.split(",") if sector_db.top_holdings else []
@@ -98,12 +119,15 @@ class ScannerService:
         Scans all sectors in parallel for institutional setups.
         Shared across all users. Results are filtered by user sectors in the API.
         """
-        if ScannerService._is_scanning:
+        if self._status["is_scanning"]:
             print("🔭 Discovery: A global scan is already in progress. Skipping.")
             return []
 
+        # We need SessionLocal for thread-safe workers
+        from database import SessionLocal
+
         try:
-            ScannerService._is_scanning = True
+            self.set_status(True, phase="retrieval", message="Scraping global ticker indices...")
             
             # 1. Global Wipe (Fresh weekly start)
             print("🔭 Discovery: Performing Global Wipe of previous findings...")
@@ -111,15 +135,16 @@ class ScannerService:
             self.session.commit()
 
             # 2. Get Global Investable Universe
-            unique_tickers = self.universe_service.get_investable_universe()
+            def liquidity_callback(current, total):
+                self.set_status(True, phase="liquidity", current=current, total=total, message=f"Checking liquidity (Chunk {current}/{total})...")
+
+            unique_tickers = self.universe_service.get_investable_universe(progress_callback=liquidity_callback)
             print(f"🔭 Discovery: Screening {len(unique_tickers)} unique symbols globally...")
 
-            # 3. Batch Weekly Technical Screening (The Speedup)
-            # This fetches indicators in bulk and avoids hundreds of individual requests
-            print(f"🔭 Discovery: Batch calculating indicators for screening...")
+            # 3. Batch Weekly Technical Screening
+            self.set_status(True, phase="screening", message="Batch calculating indicators for screening...")
             batch_weekly_data = self.finance_service.batch_get_weekly_technicals(unique_tickers)
             
-            # Prune the universe to only those passing the initial technical setup
             candidates = []
             for ticker in unique_tickers:
                 techs = batch_weekly_data.get(ticker)
@@ -128,82 +153,140 @@ class ScannerService:
                     if filters["vcp"] or filters["blue_sky"]:
                         candidates.append((ticker, techs, filters))
             
-            print(f"🔭 Discovery: {len(candidates)} candidates passed technical screening. Starting deep analysis...")
+            total_candidates = len(candidates)
+            self.set_status(True, phase="analysis", current=0, total=total_candidates, message=f"Starting deep analysis for {total_candidates} candidates...")
+            print(f"🔭 Discovery: {total_candidates} candidates passed technical screening. Starting deep analysis...")
 
             opportunities = []
+            ticker_to_sector_name = self.universe_service.get_sector_map([c[0] for c in candidates])
             
-            # Helper to map ticker to sector
-            ticker_to_sector = self.universe_service.get_sector_map([c[0] for c in candidates])
+            # --- OPTIMIZATION: Pre-fetch Sector Context (Region-Aware) ---
+            print(f"🔭 Discovery: Pre-fetching regional performance and news for unique sector-region pairs...")
             
+            # Map ticker to (sector, region) for later lookup
+            ticker_to_context_key = {}
+            unique_contexts = set() # Set of (sector_name, region)
+            
+            for ticker in ticker_to_sector_name:
+                s_name = ticker_to_sector_name[ticker]
+                if not s_name or s_name == "Unknown": continue
+                
+                region = self.finance_service._get_region_for_ticker(ticker)
+                unique_contexts.add((s_name, region))
+                ticker_to_context_key[ticker] = (s_name, region)
+                
+            sector_region_context = {}
+            for s_name, region in unique_contexts:
+                # Use centralized lookup to get the correct regional ETF
+                etf = self.finance_service.get_etf_for_sector(s_name, region=region)
+                perf = self.finance_service.get_sector_performance(etf)
+                news = self.news_service.fetch_news(etf)
+                
+                sector_region_context[(s_name, region)] = {
+                    "info": {"name": s_name, "etf": etf},
+                    "perf": perf,
+                    "news": news
+                }
+            
+            processed_count = 0
+
             def process_candidate(candidate_info):
                 ticker, weekly_techs, filters = candidate_info
-                try:
-                    # 1. Fetch RS data
-                    rs_data = self.finance_service.get_relative_strength(ticker)
-
-                    # 2. Trigger Full Analysis (AI reasoning/News/Financials)
-                    # We use System User (ID 1)
-                    rec = self.analysis_service.analyze_ticker(
-                        ticker, 
-                        user_id=1, 
-                        is_vcp=filters["vcp"],
-                        is_blue_sky=filters["blue_sky"],
-                        has_super_trend=filters["super_trend"],
-                        rs_rating=rs_data.get("rs_score"),
-                        is_decoupled=rs_data.get("is_decoupled", False)
-                    )
-                    
-                    # 3. Calculate "Hints" (Suggested Levels)
-                    price = weekly_techs.get("current_price", 0)
-                    ma10w = weekly_techs.get("ma_10w", 0)
-                    
-                    suggested_stop = float(ma10w if (ma10w > 0 and ma10w < price) else round(price * 0.92, 2))
-                    if suggested_stop < price * 0.85:
-                        suggested_stop = float(round(price * 0.90, 2))
+                # CREATE A FRESH SESSION FOR THIS WORKER THREAD
+                with SessionLocal() as worker_session:
+                    try:
+                        # Re-initialize services with the worker session
+                        from services.analysis_service import AnalysisService
+                        from services.finance_service import FinanceService
                         
-                    risk = price - suggested_stop
-                    suggested_target = float(round(price + (risk * 3), 2))
+                        f_service = FinanceService()
+                        a_service = AnalysisService(worker_session)
+                        
+                        # 1. Fetch RS data
+                        rs_data = f_service.get_relative_strength(ticker)
 
-                    sector = ticker_to_sector.get(ticker, "Unknown")
+                        # 2. Get pre-fetched regional sector context
+                        ctx_key = ticker_to_context_key.get(ticker)
+                        s_ctx = sector_region_context.get(ctx_key, {})
 
-                    opp = DiscoveryOpportunity(
-                        ticker=ticker,
-                        sector=sector,
-                        action=rec.action,
-                        reasoning=rec.reasoning,
-                        suggested_entry=float(price),
-                        suggested_stop=float(suggested_stop),
-                        suggested_target=float(suggested_target),
-                        is_vcp=filters["vcp"],
-                        is_blue_sky=filters["blue_sky"],
-                        has_super_trend=filters["super_trend"],
-                        rs_rating=float(rs_data.get("rs_score", 0)),
-                        is_decoupled=rs_data.get("is_decoupled", False)
-                    )
-                    return opp
-                except Exception as e:
-                    print(f"Error processing {ticker} during discovery: {e}")
-                return None
+                        # 3. Trigger Full Analysis
+                        rec = a_service.analyze_ticker(
+                            ticker, 
+                            user_id=1, 
+                            is_vcp=filters["vcp"],
+                            is_blue_sky=filters["blue_sky"],
+                            has_super_trend=filters["super_trend"],
+                            rs_rating=rs_data.get("rs_score"),
+                            is_decoupled=rs_data.get("is_decoupled", False),
+                            prefetched_sector_info=s_ctx.get("info"),
+                            prefetched_sector_perf=s_ctx.get("perf"),
+                            prefetched_sector_news=s_ctx.get("news")
+                        )
+                        
+                        # 3. Calculate "Hints"
+                        price = weekly_techs.get("current_price", 0)
+                        ma10w = weekly_techs.get("ma_10w", 0)
+                        
+                        suggested_stop = float(ma10w if (ma10w > 0 and ma10w < price) else round(price * 0.92, 2))
+                        if suggested_stop < price * 0.85:
+                            suggested_stop = float(round(price * 0.90, 2))
+                            
+                        risk = price - suggested_stop
+                        suggested_target = float(round(price + (risk * 3), 2))
 
-            # Execute deep analysis in parallel (I/O and LLM bound)
-            # Increased workers since many tickers were pruned by screening
+                        sector = ticker_to_sector_name.get(ticker, "Unknown")
+
+                        opp = DiscoveryOpportunity(
+                            ticker=ticker,
+                            sector=sector,
+                            action=rec.action,
+                            reasoning=rec.reasoning,
+                            suggested_entry=float(price),
+                            suggested_stop=float(suggested_stop),
+                            suggested_target=float(suggested_target),
+                            is_vcp=filters["vcp"],
+                            is_blue_sky=filters["blue_sky"],
+                            has_super_trend=filters["super_trend"],
+                            rs_rating=float(rs_data.get("rs_score", 0)),
+                            is_decoupled=rs_data.get("is_decoupled", False)
+                        )
+                        
+                        # SAVE INDIVIDUALLY FOR REAL-TIME UI UPDATES
+                        worker_session.add(opp)
+                        worker_session.commit()
+                        worker_session.refresh(opp)
+                        worker_session.expunge(opp)
+                        return opp
+                    except Exception as e:
+                        print(f"Error processing {ticker} during discovery: {e}")
+                        worker_session.rollback()
+                        return None
+
+            # Execute deep analysis in parallel
             with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
                 future_to_ticker = {executor.submit(process_candidate, c): c[0] for c in candidates}
                 for future in concurrent.futures.as_completed(future_to_ticker):
+                    processed_count += 1
                     result = future.result()
+                    ticker = future_to_ticker[future]
+                    
+                    progress_pct = (processed_count / total_candidates) * 100
+                    self.set_status(True, phase="analysis", current=processed_count, total=total_candidates, message=f"Analyzed {ticker} ({processed_count}/{total_candidates})")
+                    print(f"📊 Progress: {processed_count}/{total_candidates} ({progress_pct:.1f}%) | Last: {ticker} {'✅' if result else '❌'}")
+                    
                     if result:
-                        self.session.add(result)
                         opportunities.append(result)
             
-            self.session.commit()
+            self.set_status(False, phase="idle", message=f"Discovery complete. Found {len(opportunities)} opportunities.")
             print(f"✅ Discovery: Global scan complete. Found {len(opportunities)} opportunities.")
             return opportunities
             
         except Exception as e:
             print(f"❌ Discovery Error: {e}")
+            self.set_status(False, phase="error", message=str(e))
             return []
         finally:
-            ScannerService._is_scanning = False
+            self._status["is_scanning"] = False
 
     def _passes_technical_filter_from_data(self, tech_data: dict) -> bool:
         """

@@ -3,6 +3,8 @@ import time
 from abc import ABC, abstractmethod
 import requests
 
+TIMEOUT = 60
+
 class LLMClient(ABC):
     @abstractmethod
     def analyze_text(self, text: str, prompt: str) -> str:
@@ -23,7 +25,7 @@ class OllamaClient(LLMClient):
         start_time = time.time()
         print(f"🤖 LLM: Sending request to Ollama ({self.model})...")
         try:
-            response = requests.post(f"{self.host}/api/generate", json=payload)
+            response = requests.post(f"{self.host}/api/generate", json=payload, timeout=TIMEOUT)
             response.raise_for_status()
             duration = time.time() - start_time
             print(f"✅ LLM: Ollama responded in {duration:.2f}s")
@@ -82,7 +84,7 @@ class CloudClient(LLMClient):
             "temperature": 0.7
         }
         try:
-            response = requests.post(url, headers=headers, json=payload)
+            response = requests.post(url, headers=headers, json=payload, timeout=TIMEOUT)
             response.raise_for_status()
             data = response.json()
             return data["choices"][0]["message"]["content"]
@@ -107,7 +109,7 @@ class CloudClient(LLMClient):
             ]
         }
         try:
-            response = requests.post(url, headers=headers, json=payload)
+            response = requests.post(url, headers=headers, json=payload, timeout=TIMEOUT)
             response.raise_for_status()
             data = response.json()
             return data["content"][0]["text"]
@@ -125,7 +127,7 @@ class CloudClient(LLMClient):
             }]
         }
         try:
-            response = requests.post(url, json=payload)
+            response = requests.post(url, json=payload, timeout=TIMEOUT)
             response.raise_for_status()
             data = response.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]

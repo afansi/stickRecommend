@@ -1,7 +1,7 @@
 import yfinance as yf
 import pandas as pd
 from typing import Dict, Optional, List
-from config import SECTOR_2_ETF_MAP, COUNTRY_BENCHMARKS
+from config import SECTOR_2_ETF_MAP, COUNTRY_BENCHMARKS, ETF_HOLDINGS_FALLBACK_MAP, REGIONAL_SECTOR_MAPS
 
 from utils.cache import ttl_cache
 from utils.rate_limiter import yahoo_rate_limiter
@@ -16,6 +16,30 @@ class FinanceService:
                 return benchmark
         return COUNTRY_BENCHMARKS["default"]
 
+    def _get_region_for_ticker(self, ticker: str) -> str:
+        """Helper to classify ticker into a geographic region."""
+        if ticker.endswith((".DE", ".PA", ".L", ".AS", ".MI", ".MC")):
+            return "EU"
+        if ticker.endswith(".TO"):
+            return "CA"
+        return "US"
+
+    def get_etf_for_sector(self, sector_name: str, region: str = "US") -> str:
+        """Centralized lookup for the best ETF representing a sector in a region."""
+        regional_map = REGIONAL_SECTOR_MAPS.get(region, {})
+        # Priority: 1. Regional Map -> 2. Default US Map -> 3. SPY
+        return regional_map.get(sector_name) or SECTOR_2_ETF_MAP.get(sector_name, "SPY")
+
+    def get_all_sector_etfs(self, sector_name: str) -> List[str]:
+        """Returns a list of unique ETFs for this sector across all supported regions."""
+        etfs = set()
+        etfs.add(SECTOR_2_ETF_MAP.get(sector_name, "SPY"))
+        for region_map in REGIONAL_SECTOR_MAPS.values():
+            etf = region_map.get(sector_name)
+            if etf:
+                etfs.add(etf)
+        return list(etfs)
+
     @ttl_cache(ttl=86400) # 24 Hours (Sectors rarely change)
     def get_stock_metadata(self, ticker: str) -> Dict:
         """
@@ -27,7 +51,13 @@ class FinanceService:
             info = stock.info
             
             sector_name = info.get('sector', 'Unknown')
-            etf = SECTOR_2_ETF_MAP.get(sector_name, "SPY")
+            
+            # Select the best regional sector ETF
+            region = self._get_region_for_ticker(ticker)
+            regional_map = REGIONAL_SECTOR_MAPS.get(region, {})
+            
+            # Priority: 1. Regional Map -> 2. Default US Map -> 3. SPY
+            etf = regional_map.get(sector_name) or SECTOR_2_ETF_MAP.get(sector_name, "SPY")
 
             return {
                 "financials": {
@@ -215,24 +245,10 @@ class FinanceService:
         Fetches top 10 holdings for an ETF.
         Tries yfinance 1.0 funds_data, falls back to static map if failed/empty.
         """
-        # Static Fallback Map (Mini version)
-        FALLBACK_MAP = {
-            "XLK": ["NVDA", "MSFT", "AAPL", "AVGO", "ORCL", "CRM", "AMD", "ADBE", "QCOM", "TXN"],
-            "XLF": ["JPM", "V", "MA", "BAC", "WFC", "MS", "GS", "AXP", "BLK", "C"],
-            "XLV": ["LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "AMGN", "PFE", "ISRG", "DHR"],
-            "XLE": ["XOM", "CVX", "COP", "EOG", "SLB", "MPC", "PSX", "VLO", "WMB", "OKE"],
-            "XLY": ["AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "SBUX", "BKNG", "TJX", "MAR"],
-            "SOXX": ["NVDA", "AVGO", "AMD", "QCOM", "TXN", "MU", "INTC", "AMAT", "LRCX", "ADI"],
-            "ITA": ["RTX", "LMT", "GD", "NOC", "BA", "TDG", "LHX", "HWM", "TXT", "AXON"],
-            "XLC": ["GOOGL", "META", "NFLX", "DIS", "TMUS", "CMCSA", "VZ", "T", "CHTR", "WBD"],
-            'XLP': ['WMT', 'COST', 'PG', 'KO', 'PM', 'PEP', 'MDLZ', 'MO', 'CL', 'MNST'],
-            'XLI': ['GE', 'CAT', 'RTX', 'BA', 'UBER', 'GEV', 'UNP', 'HON', 'ETN', 'DE'],
-            'XLB': ['LIN', 'NEM', 'CRH', 'SHW', 'FCX', 'ECL', 'APD', 'CTVA', 'MLM', 'NUE'],
-            'XLU': ['NEE', 'CEG', 'SO', 'DUK', 'AEP', 'SRE', 'VST', 'D', 'EXC', 'XEL'],
-        }
         
         try:
             print(f"FinanceService: Attempting live fetch for {etf_ticker} holdings...")
+            yahoo_rate_limiter.wait_if_needed()
             stock = yf.Ticker(etf_ticker)
             
             # Method 1: yfinance 1.0 funds_data (Dynamic)
@@ -246,11 +262,11 @@ class FinanceService:
                         return symbols[:10]
 
             print(f"FinanceService: Live fetch failed or empty for {etf_ticker}. Using fallback map.")
-            return FALLBACK_MAP.get(etf_ticker, [])
+            return ETF_HOLDINGS_FALLBACK_MAP.get(etf_ticker, [])
             
         except Exception as e:
             print(f"Error fetching holdings for {etf_ticker}: {e}")
-            return FALLBACK_MAP.get(etf_ticker, [])
+            return ETF_HOLDINGS_FALLBACK_MAP.get(etf_ticker, [])
 
     @ttl_cache(ttl=3600)
     def batch_get_technicals(self, tickers: List[str]) -> Dict[str, Dict]:
@@ -263,6 +279,7 @@ class FinanceService:
         try:
             # yfinance download is faster for multiple tickers than individual fetches
             # Use 3 months of data to ensure we have enough for MA50 and RSI
+            yahoo_rate_limiter.wait_if_needed()
             data = yf.download(tickers, period="3mo", group_by="ticker", threads=True, progress=False)
             
             results = {}
@@ -318,6 +335,7 @@ class FinanceService:
             chunk = tickers[i:i + chunk_size]
             try:
                 # Fetch 2 years of data for 30w MA and 52w High
+                yahoo_rate_limiter.wait_if_needed()
                 data = yf.download(chunk, period="2y", interval="1wk", group_by="ticker", threads=True, progress=False)
                 
                 for ticker in chunk:
@@ -431,6 +449,27 @@ class FinanceService:
             print(f"Error fetching weekly technicals for {ticker}: {e}")
             return {}
 
+    @ttl_cache(ttl=43200) # 12 Hour Cache
+    def _get_benchmark_performance(self, benchmark: str) -> Dict:
+        """Helper to fetch and cache benchmark performance data once."""
+        try:
+            yahoo_rate_limiter.wait_if_needed()
+            spy = yf.Ticker(benchmark)
+            hist_spy = spy.history(period="6mo").dropna(subset=['Close'])
+            if hist_spy.empty or len(hist_spy) < 5:
+                return {}
+            
+            spy_ret = (hist_spy['Close'].iloc[-1] - hist_spy['Close'].iloc[0]) / hist_spy['Close'].iloc[0]
+            last_week_spy_ret = (hist_spy['Close'].iloc[-1] - hist_spy['Close'].iloc[-5]) / hist_spy['Close'].iloc[-5]
+            
+            return {
+                "ret_6mo": spy_ret,
+                "last_week_ret": last_week_spy_ret,
+                "prices_1m": hist_spy['Close'].iloc[-21:] if len(hist_spy) >= 21 else None
+            }
+        except Exception:
+            return {}
+
     @ttl_cache(ttl=86400)
     def get_relative_strength(self, ticker: str) -> Dict:
         """
@@ -441,21 +480,24 @@ class FinanceService:
         try:
             yahoo_rate_limiter.wait_if_needed()
             stock = yf.Ticker(ticker)
-            spy = yf.Ticker(benchmark)
             
+            # Use cached benchmark data
+            bench_data = self._get_benchmark_performance(benchmark)
+            if not bench_data:
+                 return {"rs_score": 0, "alpha_flag": False, "benchmark": benchmark}
+
             # 6-month performance - Drop NaNs to avoid calculation errors
             hist_stock = stock.history(period="6mo").dropna(subset=['Close'])
-            hist_spy = spy.history(period="6mo").dropna(subset=['Close'])
             
-            if hist_stock.empty or hist_spy.empty or len(hist_stock) < 5 or len(hist_spy) < 5:
+            if hist_stock.empty or len(hist_stock) < 5:
                 return {"rs_score": 0, "alpha_flag": False, "benchmark": benchmark}
 
             stock_ret = (hist_stock['Close'].iloc[-1] - hist_stock['Close'].iloc[0]) / hist_stock['Close'].iloc[0]
-            spy_ret = (hist_spy['Close'].iloc[-1] - hist_spy['Close'].iloc[0]) / hist_spy['Close'].iloc[0]
+            spy_ret = bench_data["ret_6mo"]
             
             # Alpha Flag: Stock up while market down in last week?
             last_week_stock = (hist_stock['Close'].iloc[-1] - hist_stock['Close'].iloc[-5]) / hist_stock['Close'].iloc[-5]
-            last_week_spy = (hist_spy['Close'].iloc[-1] - hist_spy['Close'].iloc[-5]) / hist_spy['Close'].iloc[-5]
+            last_week_spy = bench_data["last_week_ret"]
             
             # Compare vs Benchmark
             alpha_flag = last_week_stock > 0 and last_week_spy < 0
@@ -476,8 +518,8 @@ class FinanceService:
             try:
                 # 1 Month correlation
                 s_1m = hist_stock['Close'].iloc[-21:] # ~21 trading days
-                m_1m = hist_spy['Close'].iloc[-21:]
-                if len(s_1m) == len(m_1m) and len(s_1m) > 10:
+                m_1m = bench_data["prices_1m"]
+                if m_1m is not None and len(s_1m) == len(m_1m) and len(s_1m) > 10:
                     corr = s_1m.corr(m_1m)
                     if not pd.isna(corr) and corr < 0.4 and rs_score > 80:
                         is_decoupled = True

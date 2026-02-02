@@ -5,7 +5,6 @@ from database import get_session
 from models.tables import User
 from auth.security import get_current_user
 from services.news_service import NewsService
-from config import SECTOR_2_ETF_MAP
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -59,26 +58,33 @@ def get_personalized_news(session: Session = Depends(get_session), current_user:
     aggregated_news = []
     holdings_cache = {} # ETF -> Holdings
     
-    # 1. Try fetching news from user's active sectors
+    # 1. Try fetching news from user's active sectors across all regions
     for sector in sectors: 
         sector_name = sector.strip()
         if not sector_name:
             continue
             
-        etf = SECTOR_2_ETF_MAP.get(sector_name)
-        if etf and etf not in holdings_cache:
-            holdings_cache[etf] = finance_service.get_etf_holdings(etf)
+        # Get all ETFs for this sector (US, EU, CA etc)
+        etfs = finance_service.get_all_sector_etfs(sector_name)
+        
+        for etf in etfs:
+            if etf not in holdings_cache:
+                holdings_cache[etf] = finance_service.get_etf_holdings(etf)
+                
+            # Fetch news for this specific regional ETF
+            items = news_service.fetch_news(etf)
+            for item in items:
+                # Add region context to the tag if not the default SPY fallback
+                item['sector_tag'] = f"{sector_name}"
+                item['sector_holdings'] = holdings_cache.get(etf, [])
             
-        items = news_service.fetch_sector_news(sector_name)
-        for item in items:
-            item['sector_tag'] = sector_name
-            item['sector_holdings'] = holdings_cache.get(etf, [])
+            # Take top 2 per regional ETF to keep the feed diverse
+            aggregated_news.extend(items[:2])
+            
+            if len(aggregated_news) >= 30: # Slightly higher limit for global feed
+                break
         
-        # Take top 3 per sector
-        aggregated_news.extend(items[:3])
-        
-        # If we have enough news, stop to keep it fast
-        if len(aggregated_news) >= 20:
+        if len(aggregated_news) >= 30:
             break
         
     # 2. Fallback: If no news found for sectors, get general market news
