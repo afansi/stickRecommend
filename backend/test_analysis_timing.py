@@ -9,8 +9,8 @@ engine = create_engine(DATABASE_URL)
 def test_timing():
     with Session(engine) as session:
         service = AnalysisService(session)
-        print("Starting analysis for AIR.PA...")
-        rec = service.analyze_ticker("AIR.PA", user_id=1, force_refresh=True)
+        print("Starting analysis for AME...")
+        rec = service.analyze_ticker("AME", user_id=1, force_refresh=True)
         print(f"Analysis complete. Action: {rec.action}, Score: {rec.confidence_score}")
 
 if __name__ == "__main__":

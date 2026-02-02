@@ -8,6 +8,7 @@ from services.analysis_service import AnalysisService
 from services.universe_service import UniverseService
 from services.news_service import NewsService
 from models.tables import Sector, DiscoveryOpportunity
+from config import MAX_YF_WORKERS
 
 class ScannerService:
     # Class-level status to track scanning progress across instances
@@ -190,6 +191,19 @@ class ScannerService:
                     "news": news
                 }
             
+            # --- OPTIMIZATION: Batch Pre-fetch All Ticker Data ---
+            # This eliminates the 120s queue congestion by populating the cache upfront
+            candidate_tickers = [c[0] for c in candidates]
+            print(f"📦 Discovery: Batch pre-fetching metadata and technicals for {len(candidate_tickers)} candidates...")
+            
+            # 1. Pre-fetch metadata (populates cache)
+            self.finance_service.batch_get_metadata(candidate_tickers)
+            
+            # 2. Pre-fetch technicals (already batched, but call it to ensure cache population)
+            self.finance_service.batch_get_technicals(candidate_tickers)
+            
+            print(f"✅ Discovery: Batch pre-fetch complete. Starting parallel analysis with warm cache...")
+            
             processed_count = 0
 
             def process_candidate(candidate_info):
@@ -265,7 +279,7 @@ class ScannerService:
                         return None
 
             # Execute deep analysis in parallel
-            with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_YF_WORKERS) as executor:
                 future_to_ticker = {executor.submit(process_candidate, c): c[0] for c in candidates}
                 for future in concurrent.futures.as_completed(future_to_ticker):
                     processed_count += 1

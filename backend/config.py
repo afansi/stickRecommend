@@ -134,6 +134,8 @@ ETF_HOLDINGS_FALLBACK_MAP = {
     "XRE.TO": ["CAR-UN.TO", "REI-UN.TO", "GRT-UN.TO", "SRU-UN.TO", "AP-UN.TO", "DIR-UN.TO", "HR-UN.TO", "CHP-UN.TO", "KMP-UN.TO", "CAR.UN.TO"]
 }
 
+MAX_YF_WORKERS = 3
+
 # Scheduler Configuration
 SCAN_SCHEDULE = os.getenv("SCAN_SCHEDULE", "0 1 * * 0")  # Default: Sunday at 1 AM (cron format)
 ENABLE_SCHEDULED_SCAN = os.getenv("ENABLE_SCHEDULED_SCAN", "true").lower() == "true"

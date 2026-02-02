@@ -5,7 +5,7 @@ from typing import List, Optional, Dict
 from services.news_service import NewsService
 from services.llm_engine import LLMFactory
 from models.tables import Recommendation, NewsArticle
-from config import settings
+from config import settings, MAX_YF_WORKERS
 from services.finance_service import FinanceService
 import json
 
@@ -71,7 +71,7 @@ class AnalysisService:
 
         # Wave 2: Fetch EVERYTHING in parallel (Ticker + Sector data)
         # Using 7 workers for max concurrency of Yahoo calls
-        with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_YF_WORKERS) as executor:
             # Ticker Data
             ticker_news_future = executor.submit(self.news_service.fetch_news, ticker)
             technicals_future = executor.submit(self.finance_service.get_technicals, ticker)

@@ -7,6 +7,7 @@ import time
 import os
 import io
 from utils.rate_limiter import yahoo_rate_limiter
+from config import MAX_YF_WORKERS
 
 # Ticker universe cache (Long term: 7 days)
 # Ticker universe cache (Long term: 7 days)
@@ -107,8 +108,9 @@ class UniverseService:
                 print(f"⚠️ UniverseService: Error fetching sector for {t}: {e}")
                 return t, "Unknown"
 
-        # Fetch in parallel with higher workers since it's IO bound
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        # Fetch in parallel with LOWER worker count to respect rate limits
+        # Even with rate limiter, too many parallel threads overwhelm Yahoo Finance
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_YF_WORKERS) as executor:
             future_to_ticker = {executor.submit(fetch_sector, t): t for t in missing_tickers}
             for future in concurrent.futures.as_completed(future_to_ticker):
                 t, s = future.result()

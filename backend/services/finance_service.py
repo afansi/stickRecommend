@@ -1,7 +1,8 @@
 import yfinance as yf
 import pandas as pd
+import concurrent.futures
 from typing import Dict, Optional, List
-from config import SECTOR_2_ETF_MAP, COUNTRY_BENCHMARKS, ETF_HOLDINGS_FALLBACK_MAP, REGIONAL_SECTOR_MAPS
+from config import SECTOR_2_ETF_MAP, COUNTRY_BENCHMARKS, ETF_HOLDINGS_FALLBACK_MAP, REGIONAL_SECTOR_MAPS, MAX_YF_WORKERS
 
 from utils.cache import ttl_cache
 from utils.rate_limiter import yahoo_rate_limiter
@@ -101,6 +102,40 @@ class FinanceService:
         region = self._get_region_for_ticker(ticker)
         etf = self.get_etf_for_sector(sector_name, region)
         return {"name": sector_name, "etf": etf}
+
+    def batch_get_metadata(self, tickers: List[str]) -> Dict[str, Dict]:
+        """
+        Batch pre-fetch metadata for multiple tickers in parallel.
+        This populates the cache so subsequent get_stock_metadata() calls are instant.
+        """
+        if not tickers:
+            return {}
+        
+        print(f"📦 FinanceService: Batch pre-fetching metadata for {len(tickers)} tickers...")
+        results = {}
+        
+        def fetch_one(ticker):
+            try:
+                # This will populate the cache via @ttl_cache decorator
+                metadata = self.get_stock_metadata(ticker)
+                return ticker, metadata
+            except Exception as e:
+                print(f"⚠️ Batch metadata fetch failed for {ticker}: {e}")
+                return ticker, {"financials": {}, "sector": {"name": "Unknown", "etf": "SPY"}}
+        
+        # Process in chunks to avoid overwhelming the rate limiter
+        chunk_size = 20
+        for i in range(0, len(tickers), chunk_size):
+            chunk = tickers[i:i + chunk_size]
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_YF_WORKERS) as executor:
+                futures = {executor.submit(fetch_one, t): t for t in chunk}
+                for future in concurrent.futures.as_completed(futures):
+                    ticker, metadata = future.result()
+                    results[ticker] = metadata
+        
+        print(f"✅ FinanceService: Batch metadata complete for {len(results)} tickers.")
+        return results
 
     @ttl_cache(ttl=14400)  # 4 Hour Cache
     def get_technicals(self, ticker: str) -> Dict:
@@ -395,6 +430,7 @@ class FinanceService:
                             "ma_30w": float(round(ma30w, 2)) if not pd.isna(ma30w) else 0.0,
                             "ma_30w_slope": "UP" if (not pd.isna(ma30w) and not pd.isna(prev_ma30w) and ma30w > prev_ma30w) else "DOWN",
                             "rsi_w1": float(round(rsi, 2)) if not pd.isna(rsi) else 50.0,
+                            "bb_width": float(round(bb_width.iloc[-1], 4)) if not pd.isna(bb_width.iloc[-1]) else 0.0,
                             "is_vcp": bool(is_compressed) if not pd.isna(is_compressed) else False,
                             "current_price": float(round(close.iloc[-1], 2)),
                             "high_52w": float(round(high_52w, 2)) if not pd.isna(high_52w) else 0.0
