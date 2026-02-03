@@ -239,16 +239,31 @@ class ScannerService:
                             prefetched_sector_news=s_ctx.get("news")
                         )
                         
-                        # 3. Calculate "Hints"
+                        # 3. Calculate Position Sizing Hints (Now Probabilistic!)
                         price = weekly_techs.get("current_price", 0)
-                        ma10w = weekly_techs.get("ma_10w", 0)
                         
-                        suggested_stop = float(ma10w if (ma10w > 0 and ma10w < price) else round(price * 0.92, 2))
+                        # Use probabilistic targets derived from 52-week statistical analysis
+                        # Fallback to MA10W or 8% stop if probabilistic data unavailable
+                        prob_stop = weekly_techs.get("prob_stop_price")
+                        prob_target = weekly_techs.get("prob_target_price")
+                        
+                        if prob_stop and prob_stop > 0 and prob_stop < price:
+                            suggested_stop = float(prob_stop)
+                        else:
+                            # Fallback: Use MA10W or 8% stop
+                            ma10w = weekly_techs.get("ma_10w", 0)
+                            suggested_stop = float(ma10w if (ma10w > 0 and ma10w < price) else round(price * 0.92, 2))
+                        
+                        # Ensure stop isn't too aggressive (min 10% from price)
                         if suggested_stop < price * 0.85:
                             suggested_stop = float(round(price * 0.90, 2))
-                            
-                        risk = price - suggested_stop
-                        suggested_target = float(round(price + (risk * 3), 2))
+                        
+                        if prob_target and prob_target > price:
+                            suggested_target = float(prob_target)
+                        else:
+                            # Fallback: 3:1 R:R ratio
+                            risk = price - suggested_stop
+                            suggested_target = float(round(price + (risk * 3), 2))
 
                         sector = ticker_to_sector_name.get(ticker, "Unknown")
 

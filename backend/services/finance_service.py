@@ -425,6 +425,24 @@ class FinanceService:
                         
                         high_52w = high.rolling(window=52).max().iloc[-1]
                         
+                        # Probabilistic Stop/Target Calculation (80% confidence)
+                        # Use last 52 weeks of data for statistical analysis
+                        recent_data = t_data.tail(52)
+                        
+                        # Calculate intraweek moves (relative to week's open)
+                        weekly_downside = (recent_data['Low'] - recent_data['Open']) / recent_data['Open']
+                        weekly_upside = (recent_data['High'] - recent_data['Open']) / recent_data['Open']
+                        
+                        # 20th percentile downside = 80% of weeks didn't drop this far
+                        stop_pct = weekly_downside.quantile(0.20) if len(weekly_downside) > 10 else -0.08
+                        # 80th percentile upside = price reached this level in 80% of weeks
+                        target_pct = weekly_upside.quantile(0.80) if len(weekly_upside) > 10 else 0.10
+                        
+                        # Apply to current price
+                        current_price = float(round(close.iloc[-1], 2))
+                        prob_stop = current_price * (1 + stop_pct)
+                        prob_target = current_price * (1 + target_pct)
+                        
                         all_results[ticker] = {
                             "ma_10w": float(round(ma10w, 2)) if not pd.isna(ma10w) else 0.0,
                             "ma_30w": float(round(ma30w, 2)) if not pd.isna(ma30w) else 0.0,
@@ -432,8 +450,13 @@ class FinanceService:
                             "rsi_w1": float(round(rsi, 2)) if not pd.isna(rsi) else 50.0,
                             "bb_width": float(round(bb_width.iloc[-1], 4)) if not pd.isna(bb_width.iloc[-1]) else 0.0,
                             "is_vcp": bool(is_compressed) if not pd.isna(is_compressed) else False,
-                            "current_price": float(round(close.iloc[-1], 2)),
-                            "high_52w": float(round(high_52w, 2)) if not pd.isna(high_52w) else 0.0
+                            "current_price": current_price,
+                            "high_52w": float(round(high_52w, 2)) if not pd.isna(high_52w) else 0.0,
+                            # New probabilistic targets
+                            "prob_stop_price": float(round(prob_stop, 2)),
+                            "prob_target_price": float(round(prob_target, 2)),
+                            "prob_stop_pct": float(round(stop_pct * 100, 2)),
+                            "prob_target_pct": float(round(target_pct * 100, 2))
                         }
                     except Exception:
                         continue
