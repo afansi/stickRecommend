@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import {
     Compass,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react';
 
 const TradingHub = () => {
+    const navigate = useNavigate();
     const [macro, setMacro] = useState(null);
     const [correlations, setCorrelations] = useState(null);
     const [opportunities, setOpportunities] = useState([]);
@@ -252,7 +254,11 @@ const TradingHub = () => {
                                 </div>
                             ) : (
                                 opportunities.map((opp, idx) => (
-                                    <div key={idx} className="bg-background/40 p-4 rounded-xl border border-gray-800 hover:border-primary/50 transition-all group relative">
+                                    <div
+                                        key={idx}
+                                        onClick={() => navigate(`/analysis/${opp.ticker}`)}
+                                        className="bg-background/40 p-4 rounded-xl border border-gray-800 hover:border-primary/50 transition-all group relative cursor-pointer"
+                                    >
                                         <div className="flex justify-between items-start mb-2">
                                             <div className="text-2xl font-black group-hover:text-primary transition-colors">{opp.ticker}</div>
                                             <div className="flex flex-col items-end">
@@ -278,11 +284,23 @@ const TradingHub = () => {
                                                 {opp.is_blue_sky && <span className="text-[10px] bg-blue-500/20 text-blue-400 font-bold px-2 py-0.5 rounded border border-blue-500/30">BREAKOUT</span>}
                                             </div>
                                             <button
-                                                onClick={() => handleOpenCommitModal(opp)}
+                                                onClick={(e) => {
+                                                    e.stopPropagation(); // Prevent card click
+                                                    handleOpenCommitModal(opp);
+                                                }}
                                                 className="text-[10px] bg-primary text-black font-bold px-3 py-1 rounded hover:bg-primary/80 transition-all opacity-0 group-hover:opacity-100 flex items-center gap-1"
                                             >
                                                 <Target size={10} /> COMMIT TO PLAN
                                             </button>
+                                        </div>
+
+                                        {/* Visual hint for clickability */}
+                                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <span className="text-[10px] text-gray-500 flex items-center gap-1">
+                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                                </svg>
+                                            </span>
                                         </div>
                                     </div>
                                 ))
